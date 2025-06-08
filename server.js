@@ -79,22 +79,6 @@ app.delete('/api/insegnanti/:id', async (req, res) => {
 });
 
 
-// Endpoint temporaneo per creare tabella lezioni
-app.get('/api/init-lezioni', async (req, res) => {
-  try {
-    await pool.query(`
-      ALTER TABLE lezioni
-ADD COLUMN ora_inizio TIME,
-ADD COLUMN ora_fine TIME;
-    `);
-    res.json({ message: 'Tabella lezioni creata (o già esistente).' });
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: 'Errore nella creazione della tabella lezioni' });
-  }
-});
-
-
 //////////////////////
 // API LEZIONI
 //////////////////////
