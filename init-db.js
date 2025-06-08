@@ -1,5 +1,3 @@
-
-// init-db.js
 const { pool } = require('./db');
 
 async function initializeDatabase() {
@@ -49,6 +47,3 @@ async function initializeDatabase() {
 
 module.exports = initializeDatabase;
 
-}
-
-createTables();
