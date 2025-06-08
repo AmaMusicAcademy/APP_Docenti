@@ -85,14 +85,15 @@ app.delete('/api/insegnanti/:id', async (req, res) => {
 // ✅ GET tutte le lezioni
 app.get('/api/lezioni', async (req, res) => {
   try {
-    const { rows } = await pool.query('SELECT * FROM lezioni ORDER BY data, ora_inizio');
+    const { rows } = await pool.query('SELECT * FROM lezioni');
     res.json(rows);
   } catch (err) {
+    console.error(err);
     res.status(500).json({ error: 'Errore nel recupero lezioni' });
   }
 });
 
-// ✅ GET singola lezione
+// ✅ GET una singola lezione per ID
 app.get('/api/lezioni/:id', async (req, res) => {
   const { id } = req.params;
   try {
@@ -104,42 +105,49 @@ app.get('/api/lezioni/:id', async (req, res) => {
   }
 });
 
-// ✅ POST crea lezione
+// ✅ POST crea una nuova lezione
 app.post('/api/lezioni', async (req, res) => {
-  const { id_insegnante, id_allievo, id_aula, data, ora_inizio, ora_fine, stato } = req.body;
+  const { id_insegnante, id_allievo, data, ora_inizio, ora_fine, aula, stato } = req.body;
   try {
     const { rows } = await pool.query(
-      `INSERT INTO lezioni (id_insegnante, id_allievo, id_aula, data, ora_inizio, ora_fine, stato)
-       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
-      [id_insegnante, id_allievo, id_aula, data, ora_inizio, ora_fine, stato || 'futura']
+      `INSERT INTO lezioni 
+        (id_insegnante, id_allievo, data, ora_inizio, ora_fine, aula, stato) 
+        VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
+      [id_insegnante, id_allievo, data, ora_inizio, ora_fine, aula, stato]
     );
     res.status(201).json(rows[0]);
   } catch (err) {
+    console.error(err);
     res.status(500).json({ error: 'Errore nella creazione lezione' });
   }
 });
 
-// ✅ PUT modifica lezione
+// ✅ PUT aggiorna una lezione
 app.put('/api/lezioni/:id', async (req, res) => {
   const { id } = req.params;
-  const { id_insegnante, id_allievo, id_aula, data, ora_inizio, ora_fine, stato } = req.body;
+  const { id_insegnante, id_allievo, data, ora_inizio, ora_fine, aula, stato } = req.body;
   try {
     const { rows } = await pool.query(
-      `UPDATE lezioni
-       SET id_insegnante = $1, id_allievo = $2, id_aula = $3, data = $4,
-           ora_inizio = $5, ora_fine = $6, stato = $7
-       WHERE id = $8
-       RETURNING *`,
-      [id_insegnante, id_allievo, id_aula, data, ora_inizio, ora_fine, stato, id]
+      `UPDATE lezioni SET 
+        id_insegnante = $1, 
+        id_allievo = $2, 
+        data = $3, 
+        ora_inizio = $4, 
+        ora_fine = $5, 
+        aula = $6, 
+        stato = $7
+       WHERE id = $8 RETURNING *`,
+      [id_insegnante, id_allievo, data, ora_inizio, ora_fine, aula, stato, id]
     );
     if (rows.length === 0) return res.status(404).json({ error: 'Lezione non trovata' });
     res.json(rows[0]);
   } catch (err) {
+    console.error(err);
     res.status(500).json({ error: 'Errore nell\'aggiornamento lezione' });
   }
 });
 
-// ✅ DELETE lezione
+// ✅ DELETE elimina una lezione
 app.delete('/api/lezioni/:id', async (req, res) => {
   const { id } = req.params;
   try {
@@ -147,9 +155,11 @@ app.delete('/api/lezioni/:id', async (req, res) => {
     if (rowCount === 0) return res.status(404).json({ error: 'Lezione non trovata' });
     res.json({ message: 'Lezione eliminata' });
   } catch (err) {
+    console.error(err);
     res.status(500).json({ error: 'Errore nella cancellazione lezione' });
   }
 });
+
 
 
 //////////////////////
