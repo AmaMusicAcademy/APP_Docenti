@@ -3,47 +3,46 @@ const { pool } = require('./db');
 async function initializeDatabase() {
   try {
     await pool.query(`
-      CREATE TABLE IF NOT EXISTS studenti (
-        id SERIAL PRIMARY KEY,
-        nome VARCHAR(255) NOT NULL,
-        email VARCHAR(255) UNIQUE NOT NULL
-      );
-    `);
-
-    await pool.query(`
       CREATE TABLE IF NOT EXISTS insegnanti (
         id SERIAL PRIMARY KEY,
-        nome VARCHAR(255) NOT NULL
+        nome VARCHAR(100) NOT NULL,
+        cognome VARCHAR(100) NOT NULL
       );
     `);
 
     await pool.query(`
-      CREATE TABLE IF NOT EXISTS aule (
+      CREATE TABLE IF NOT EXISTS allievi (
         id SERIAL PRIMARY KEY,
-        nome VARCHAR(100) NOT NULL
+        nome VARCHAR(100) NOT NULL,
+        cognome VARCHAR(100) NOT NULL
       );
     `);
 
     await pool.query(`
-      CREATE TABLE IF NOT EXISTS appuntamenti (
+      CREATE TABLE IF NOT EXISTS lezioni (
         id SERIAL PRIMARY KEY,
-        studente_id INTEGER REFERENCES studenti(id),
+        allievo_id INTEGER REFERENCES allievi(id),
         insegnante_id INTEGER REFERENCES insegnanti(id),
-        aula_id INTEGER REFERENCES aule(id),
-        inizio TIMESTAMP NOT NULL,
-        fine TIMESTAMP NOT NULL,
-        ripetizione BOOLEAN DEFAULT FALSE,
-        data_fine_ripetizione TIMESTAMP
+        aula VARCHAR(50),
+        data TIMESTAMP NOT NULL,
+        stato VARCHAR(50) DEFAULT 'prevista'
       );
     `);
 
-    console.log('Tabelle create o già presenti.');
-    return 'Tabelle create o già presenti.';
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS pagamenti (
+        id SERIAL PRIMARY KEY,
+        allievo_id INTEGER REFERENCES allievi(id),
+        importo NUMERIC(10, 2),
+        data_pagamento DATE
+      );
+    `);
+
+    console.log("Tabelle create o già presenti.");
   } catch (error) {
-    console.error('Errore nella creazione delle tabelle:', error);
-    throw error;
+    console.error("Errore nella creazione delle tabelle:", error);
   }
 }
 
-module.exports = initializeDatabase;
+module.exports = { initializeDatabase };
 
