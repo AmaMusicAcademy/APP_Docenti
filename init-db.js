@@ -21,11 +21,13 @@ async function initializeDatabase() {
     await pool.query(`
       CREATE TABLE IF NOT EXISTS lezioni (
         id SERIAL PRIMARY KEY,
-        allievo_id INTEGER REFERENCES allievi(id),
-        insegnante_id INTEGER REFERENCES insegnanti(id),
-        aula VARCHAR(50),
-        data TIMESTAMP NOT NULL,
-        stato VARCHAR(50) DEFAULT 'prevista'
+        id_insegnante INTEGER REFERENCES insegnanti(id) ON DELETE CASCADE,
+        id_allievo INTEGER,
+        id_aula INTEGER,
+        data DATE NOT NULL,
+        ora_inizio TIME NOT NULL,
+        ora_fine TIME NOT NULL,
+        stato VARCHAR(20) CHECK (stato IN ('svolta', 'rimandata', 'annullata', 'futura')) NOT NULL DEFAULT 'futura'
       );
     `);
 
