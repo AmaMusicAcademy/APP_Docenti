@@ -7,6 +7,16 @@ const PORT = process.env.PORT || 3000;
 
 app.use(express.json());
 
+app.get('/api/drop-lezioni', async (req, res) => {
+  try {
+    await pool.query('DROP TABLE IF EXISTS lezioni');
+    res.json({ message: 'Tabella lezioni eliminata' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Errore nell\'eliminazione della tabella lezioni' });
+  }
+});
+
 ////////////////////////
 // ENDPOINT DI TEST
 ////////////////////////
