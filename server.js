@@ -78,6 +78,17 @@ app.delete('/api/insegnanti/:id', async (req, res) => {
   }
 });
 
+// ⚠️ Endpoint temporaneo per eliminare la tabella lezioni
+app.delete('/api/drop-lezioni', async (req, res) => {
+  try {
+    await pool.query('DROP TABLE IF EXISTS lezioni');
+    res.json({ message: 'Tabella lezioni eliminata' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Errore nell\'eliminazione della tabella lezioni' });
+  }
+});
+
 
 //////////////////////
 // API LEZIONI
