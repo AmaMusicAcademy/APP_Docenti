@@ -38,11 +38,11 @@ app.get('/api/insegnanti/:id', async (req, res) => {
 
 // ✅ POST crea insegnante
 app.post('/api/insegnanti', async (req, res) => {
-  const { nome, cognome, email, telefono } = req.body;
+  const { id, nome, cognome } = req.body;
   try {
     const { rows } = await pool.query(
-      'INSERT INTO insegnanti (nome, cognome, email, telefono) VALUES ($1, $2, $3, $4) RETURNING *',
-      [nome, cognome, email, telefono]
+      'INSERT INTO insegnanti (id, nome, cognome) VALUES ($1, $2, $3) RETURNING *',
+      [id, nome, cognome]
     );
     res.status(201).json(rows[0]);
   } catch (err) {
