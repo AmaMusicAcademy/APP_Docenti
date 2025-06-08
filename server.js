@@ -84,15 +84,14 @@ app.get('/api/init-lezioni', async (req, res) => {
     await pool.query(`
       CREATE TABLE IF NOT EXISTS lezioni (
         id SERIAL PRIMARY KEY,
+        id_insegnante INTEGER REFERENCES insegnanti(id) ON DELETE CASCADE,
+        id_allievo INTEGER,
+        id_aula INTEGER,
         data DATE NOT NULL,
-        ora_inizio TIME,
-        ora_fine TIME,
-        aula VARCHAR(50),
-        stato VARCHAR(20),
-        insegnante_id INTEGER REFERENCES insegnanti(id),
-        allievo_id INTEGER,
-        CONSTRAINT stato_check CHECK (stato IN ('svolta', 'rimandata', 'annullata', 'da_fare'))
-      )
+        ora_inizio TIME NOT NULL,
+        ora_fine TIME NOT NULL,
+        stato VARCHAR(20) CHECK (stato IN ('svolta', 'rimandata', 'annullata', 'futura')) NOT NULL DEFAULT 'futura'
+      );
     `);
     res.json({ message: 'Tabella lezioni creata (o già esistente).' });
   } catch (error) {
