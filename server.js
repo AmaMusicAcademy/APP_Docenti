@@ -78,6 +78,28 @@ app.delete('/api/insegnanti/:id', async (req, res) => {
   }
 });
 
+// ✅ Crea tabella lezioni
+app.get('/api/init-lezioni', async (req, res) => {
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS lezioni (
+        id SERIAL PRIMARY KEY,
+        id_insegnante INTEGER REFERENCES insegnanti(id) ON DELETE CASCADE,
+        id_allievo INTEGER,
+        id_aula INTEGER,
+        data DATE NOT NULL,
+        ora_inizio TIME NOT NULL,
+        ora_fine TIME NOT NULL,
+        stato VARCHAR(20) CHECK (stato IN ('svolta', 'rimandata', 'annullata', 'futura')) NOT NULL DEFAULT 'futura'
+      );
+    `);
+    res.json({ message: 'Tabella lezioni creata o già esistente.' });
+  } catch (err) {
+    console.error('Errore creazione tabella lezioni:', err);
+    res.status(500).json({ error: 'Errore nella creazione tabella lezioni' });
+  }
+});
+
 // Avvio server
 app.listen(PORT, () => {
   console.log(`Server in ascolto sulla porta ${PORT}`);
