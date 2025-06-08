@@ -78,6 +78,31 @@ app.delete('/api/insegnanti/:id', async (req, res) => {
   }
 });
 
+
+// Endpoint temporaneo per creare tabella lezioni
+app.get('/api/init-lezioni', async (req, res) => {
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS lezioni (
+        id SERIAL PRIMARY KEY,
+        data DATE NOT NULL,
+        ora_inizio TIME,
+        ora_fine TIME,
+        aula VARCHAR(50),
+        stato VARCHAR(20),
+        insegnante_id INTEGER REFERENCES insegnanti(id),
+        allievo_id INTEGER,
+        CONSTRAINT stato_check CHECK (stato IN ('svolta', 'rimandata', 'annullata', 'da_fare'))
+      )
+    `);
+    res.json({ message: 'Tabella lezioni creata (o già esistente).' });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Errore nella creazione della tabella lezioni' });
+  }
+});
+
+
 //////////////////////
 // API LEZIONI
 //////////////////////
