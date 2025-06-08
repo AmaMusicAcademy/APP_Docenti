@@ -1,6 +1,5 @@
 const express = require('express');
 const { pool } = require('./db');
-
 require('dotenv').config();
 
 const app = express();
@@ -8,12 +7,18 @@ const PORT = process.env.PORT || 3000;
 
 app.use(express.json());
 
-// Endpoint di test
+////////////////////////
+// ENDPOINT DI TEST
+////////////////////////
 app.get('/api/test', (req, res) => {
   res.json({ message: 'API funzionante!' });
 });
 
-// ✅ GET all insegnanti
+////////////////////////
+// INSEGNANTI
+////////////////////////
+
+// GET tutti gli insegnanti
 app.get('/api/insegnanti', async (req, res) => {
   try {
     const { rows } = await pool.query('SELECT * FROM insegnanti');
@@ -24,7 +29,7 @@ app.get('/api/insegnanti', async (req, res) => {
   }
 });
 
-// ✅ GET one insegnante
+// GET un insegnante
 app.get('/api/insegnanti/:id', async (req, res) => {
   try {
     const { id } = req.params;
@@ -36,28 +41,29 @@ app.get('/api/insegnanti/:id', async (req, res) => {
   }
 });
 
-// ✅ POST crea insegnante
+// POST nuovo insegnante
 app.post('/api/insegnanti', async (req, res) => {
-  const { id, nome, cognome } = req.body;
+  const { nome, cognome } = req.body;
   try {
     const { rows } = await pool.query(
-      'INSERT INTO insegnanti (id, nome, cognome) VALUES ($1, $2, $3) RETURNING *',
-      [id, nome, cognome]
+      'INSERT INTO insegnanti (nome, cognome) VALUES ($1, $2) RETURNING *',
+      [nome, cognome]
     );
     res.status(201).json(rows[0]);
   } catch (err) {
+    console.error(err);
     res.status(500).json({ error: 'Errore nella creazione insegnante' });
   }
 });
 
-// ✅ PUT modifica insegnante
+// PUT modifica insegnante
 app.put('/api/insegnanti/:id', async (req, res) => {
   const { id } = req.params;
-  const { nome, cognome, email, telefono } = req.body;
+  const { nome, cognome } = req.body;
   try {
     const { rows } = await pool.query(
-      'UPDATE insegnanti SET nome = $1, cognome = $2, email = $3, telefono = $4 WHERE id = $5 RETURNING *',
-      [nome, cognome, email, telefono, id]
+      'UPDATE insegnanti SET nome = $1, cognome = $2 WHERE id = $3 RETURNING *',
+      [nome, cognome, id]
     );
     if (rows.length === 0) return res.status(404).json({ error: 'Insegnante non trovato' });
     res.json(rows[0]);
@@ -66,7 +72,7 @@ app.put('/api/insegnanti/:id', async (req, res) => {
   }
 });
 
-// ✅ DELETE insegnante
+// DELETE insegnante
 app.delete('/api/insegnanti/:id', async (req, res) => {
   const { id } = req.params;
   try {
@@ -78,11 +84,11 @@ app.delete('/api/insegnanti/:id', async (req, res) => {
   }
 });
 
-//////////////////////
-// API LEZIONI
-//////////////////////
+////////////////////////
+// LEZIONI
+////////////////////////
 
-// ✅ GET tutte le lezioni
+// GET tutte le lezioni
 app.get('/api/lezioni', async (req, res) => {
   try {
     const { rows } = await pool.query('SELECT * FROM lezioni');
@@ -93,7 +99,7 @@ app.get('/api/lezioni', async (req, res) => {
   }
 });
 
-// ✅ GET una singola lezione per ID
+// GET una lezione
 app.get('/api/lezioni/:id', async (req, res) => {
   const { id } = req.params;
   try {
@@ -105,7 +111,7 @@ app.get('/api/lezioni/:id', async (req, res) => {
   }
 });
 
-// ✅ POST crea una nuova lezione
+// POST nuova lezione
 app.post('/api/lezioni', async (req, res) => {
   const { id_insegnante, id_allievo, data, ora_inizio, ora_fine, aula, stato } = req.body;
   try {
@@ -122,7 +128,7 @@ app.post('/api/lezioni', async (req, res) => {
   }
 });
 
-// ✅ PUT aggiorna una lezione
+// PUT modifica lezione
 app.put('/api/lezioni/:id', async (req, res) => {
   const { id } = req.params;
   const { id_insegnante, id_allievo, data, ora_inizio, ora_fine, aula, stato } = req.body;
@@ -147,7 +153,7 @@ app.put('/api/lezioni/:id', async (req, res) => {
   }
 });
 
-// ✅ DELETE elimina una lezione
+// DELETE lezione
 app.delete('/api/lezioni/:id', async (req, res) => {
   const { id } = req.params;
   try {
@@ -160,13 +166,10 @@ app.delete('/api/lezioni/:id', async (req, res) => {
   }
 });
 
-
-
-//////////////////////
-// SERVER START
-//////////////////////
-
-// Avvio server
+////////////////////////
+// AVVIO SERVER
+////////////////////////
 app.listen(PORT, () => {
   console.log(`Server in ascolto sulla porta ${PORT}`);
 });
+
