@@ -7,7 +7,7 @@ const PORT = process.env.PORT || 3000;
 
 app.use(express.json());
 
-app.get('/api/drop-lezioni', async (req, res) => {
+/*app.get('/api/drop-lezioni', async (req, res) => {
   try {
     await pool.query('DROP TABLE IF EXISTS lezioni');
     res.json({ message: 'Tabella lezioni eliminata' });
@@ -15,7 +15,30 @@ app.get('/api/drop-lezioni', async (req, res) => {
     console.error(err);
     res.status(500).json({ error: 'Errore nell\'eliminazione della tabella lezioni' });
   }
+});*/
+
+// ✅ Crea tabella lezioni
+app.get('/api/init-lezioni', async (req, res) => {
+  try {
+    await pool.query(`
+      CREATE TABLE lezioni (
+  id SERIAL PRIMARY KEY,
+  id_insegnante INTEGER REFERENCES insegnanti(id),
+  id_allievo INTEGER,
+  data DATE,
+  ora_inizio TIME,
+  ora_fine TIME,
+  aula VARCHAR(50),
+  stato VARCHAR(20)
+);
+    `);
+    res.json({ message: 'Tabella lezioni creata o già esistente.' });
+  } catch (err) {
+    console.error('Errore creazione tabella lezioni:', err);
+    res.status(500).json({ error: 'Errore nella creazione tabella lezioni' });
+  }
 });
+
 
 ////////////////////////
 // ENDPOINT DI TEST
