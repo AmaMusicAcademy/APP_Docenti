@@ -1,3 +1,5 @@
+require('dotenv').config();
+
 const { Pool } = require('pg');
 
 // Configura i dati di connessione al tuo DB PostgreSQL
