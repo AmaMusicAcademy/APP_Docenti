@@ -78,25 +78,76 @@ app.delete('/api/insegnanti/:id', async (req, res) => {
   }
 });
 
-// Endpoint temporaneo per creare tabella lezioni
-app.get('/api/init-lezioni', async (req, res) => {
+//////////////////////
+// API LEZIONI
+//////////////////////
+
+// ✅ GET tutte le lezioni
+app.get('/api/lezioni', async (req, res) => {
   try {
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS lezioni (
-        id SERIAL PRIMARY KEY,
-        id_insegnante INTEGER REFERENCES insegnanti(id) ON DELETE CASCADE,
-        id_allievo INTEGER,
-        id_aula INTEGER,
-        data DATE NOT NULL,
-        ora_inizio TIME NOT NULL,
-        ora_fine TIME NOT NULL,
-        stato VARCHAR(20) CHECK (stato IN ('svolta', 'rimandata', 'annullata', 'futura')) NOT NULL DEFAULT 'futura'
-      );
-    `);
-    res.json({ message: 'Tabella lezioni creata (o già esistente).' });
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: 'Errore nella creazione della tabella lezioni' });
+    const { rows } = await pool.query('SELECT * FROM lezioni ORDER BY data, ora_inizio');
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: 'Errore nel recupero lezioni' });
+  }
+});
+
+// ✅ GET singola lezione
+app.get('/api/lezioni/:id', async (req, res) => {
+  const { id } = req.params;
+  try {
+    const { rows } = await pool.query('SELECT * FROM lezioni WHERE id = $1', [id]);
+    if (rows.length === 0) return res.status(404).json({ error: 'Lezione non trovata' });
+    res.json(rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: 'Errore nel recupero lezione' });
+  }
+});
+
+// ✅ POST crea lezione
+app.post('/api/lezioni', async (req, res) => {
+  const { id_insegnante, id_allievo, id_aula, data, ora_inizio, ora_fine, stato } = req.body;
+  try {
+    const { rows } = await pool.query(
+      `INSERT INTO lezioni (id_insegnante, id_allievo, id_aula, data, ora_inizio, ora_fine, stato)
+       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
+      [id_insegnante, id_allievo, id_aula, data, ora_inizio, ora_fine, stato || 'futura']
+    );
+    res.status(201).json(rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: 'Errore nella creazione lezione' });
+  }
+});
+
+// ✅ PUT modifica lezione
+app.put('/api/lezioni/:id', async (req, res) => {
+  const { id } = req.params;
+  const { id_insegnante, id_allievo, id_aula, data, ora_inizio, ora_fine, stato } = req.body;
+  try {
+    const { rows } = await pool.query(
+      `UPDATE lezioni
+       SET id_insegnante = $1, id_allievo = $2, id_aula = $3, data = $4,
+           ora_inizio = $5, ora_fine = $6, stato = $7
+       WHERE id = $8
+       RETURNING *`,
+      [id_insegnante, id_allievo, id_aula, data, ora_inizio, ora_fine, stato, id]
+    );
+    if (rows.length === 0) return res.status(404).json({ error: 'Lezione non trovata' });
+    res.json(rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: 'Errore nell\'aggiornamento lezione' });
+  }
+});
+
+// ✅ DELETE lezione
+app.delete('/api/lezioni/:id', async (req, res) => {
+  const { id } = req.params;
+  try {
+    const { rowCount } = await pool.query('DELETE FROM lezioni WHERE id = $1', [id]);
+    if (rowCount === 0) return res.status(404).json({ error: 'Lezione non trovata' });
+    res.json({ message: 'Lezione eliminata' });
+  } catch (err) {
+    res.status(500).json({ error: 'Errore nella cancellazione lezione' });
   }
 });
 
