@@ -1,13 +1,14 @@
-const mysql = require('mysql2/promise');
+const { Pool } = require('pg');
 
-const pool = mysql.createPool({
-  host: 'sql.amamusicacademy.it',       // es. 'localhost' o indirizzo DB Tophost
-  user: 'amamusic47740',        // utente DB
-  password: 'amam45804',  // password DB
-  database: 'amamusic47740',    // nome DB
-  waitForConnections: true,
-  connectionLimit: 10,
-  queueLimit: 0
+const pool = new Pool({
+  host: 'dpg-d12n0s49c44c738g0drg-a',
+  port: 5432,
+  user: 'accademia_db_user',
+  password: 't4VtyqmwjujGaAhiyy0nn3GB5g6ipVKf',
+  database: 'accademia_db',
+  ssl: {
+    rejectUnauthorized: false,
+  }
 });
 
 module.exports = pool;
