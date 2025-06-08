@@ -1,0 +1,12 @@
+{
+  "name": "accademia-backend",
+  "version": "1.0.0",
+  "description": "Backend per la webapp dell'accademia",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2"
+  }
+}
