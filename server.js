@@ -1,9 +1,14 @@
+
+
 const express = require('express');
+const cors = require('cors'); // 👈 Importa il pacchetto
 const { pool } = require('./db');
 require('dotenv').config();
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+app.use(cors()); // 👈 Abilita CORS per tutte le origini
 
 app.use(express.json());
 
