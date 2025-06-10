@@ -204,6 +204,22 @@ app.delete('/api/lezioni/:id', async (req, res) => {
   }
 });
 
+// ✅ GET lezioni di un insegnante specifico
+app.get('/api/insegnanti/:id/lezioni', async (req, res) => {
+  const { id } = req.params;
+  try {
+    const { rows } = await pool.query(
+      'SELECT * FROM lezioni WHERE id_insegnante = $1',
+      [id]
+    );
+    res.json(rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Errore nel recupero delle lezioni per l\'insegnante' });
+  }
+});
+
+
 ////////////////////////
 // AVVIO SERVER
 ////////////////////////
