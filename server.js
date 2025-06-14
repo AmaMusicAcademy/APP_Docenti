@@ -127,7 +127,23 @@ app.delete('/api/insegnanti/:id', async (req, res) => {
 // GET tutte le lezioni
 app.get('/api/lezioni', async (req, res) => {
   try {
-    const { rows } = await pool.query('SELECT * FROM lezioni');
+    const { rows } = await pool.query('                                
+        lezioni.id,
+        lezioni.data,
+        lezioni.ora_inizio,
+        lezioni.ora_fine,
+        lezioni.aula,
+        lezioni.stato,
+        lezioni.id_insegnante,
+        lezioni.id_allievo,
+        insegnanti.nome AS nome_insegnante,
+        insegnanti.cognome AS cognome_insegnante,
+        allievi.nome AS nome_allievo,
+        allievi.cognome AS cognome_allievo
+      FROM lezioni
+      LEFT JOIN insegnanti ON lezioni.id_insegnante = insegnanti.id
+      LEFT JOIN allievi ON lezioni.id_allievo = allievi.id
+    `);
     res.json(rows);
   } catch (err) {
     console.error(err);
