@@ -275,6 +275,120 @@ app.get('/api/init-allievi', async (req, res) => {
   }
 });
 
+////////////////////////
+// ALLIEVI
+////////////////////////
+
+// GET tutti gli allievi
+app.get('/api/allievi', async (req, res) => {
+  try {
+    const { rows } = await pool.query('SELECT * FROM allievi ORDER BY cognome, nome');
+    res.json(rows);
+  } catch (err) {
+    console.error('Errore nel recupero allievi:', err);
+    res.status(500).json({ error: 'Errore nel recupero allievi' });
+  }
+});
+
+// GET un allievo per ID
+app.get('/api/allievi/:id', async (req, res) => {
+  const { id } = req.params;
+  try {
+    const { rows } = await pool.query('SELECT * FROM allievi WHERE id = $1', [id]);
+    if (rows.length === 0) return res.status(404).json({ error: 'Allievo non trovato' });
+    res.json(rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: 'Errore nel recupero allievo' });
+  }
+});
+
+// POST nuovo allievo
+app.post('/api/allievi', async (req, res) => {
+  const {
+    nome,
+    cognome,
+    email,
+    telefono,
+    note,
+    attivo = true,
+    data_iscrizione,
+    lezioni_effettuate = 0,
+    lezioni_da_pagare = 0,
+    totale_pagamenti = 0,
+    ultimo_pagamento
+  } = req.body;
+
+  try {
+    const { rows } = await pool.query(
+      `INSERT INTO allievi (
+        nome, cognome, email, telefono, note, attivo,
+        data_iscrizione, lezioni_effettuate, lezioni_da_pagare,
+        totale_pagamenti, ultimo_pagamento
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
+      [nome, cognome, email, telefono, note, attivo, data_iscrizione, lezioni_effettuate, lezioni_da_pagare, totale_pagamenti, ultimo_pagamento]
+    );
+    res.status(201).json(rows[0]);
+  } catch (err) {
+    console.error('Errore nella creazione allievo:', err);
+    res.status(500).json({ error: 'Errore nella creazione allievo' });
+  }
+});
+
+// PUT modifica allievo
+app.put('/api/allievi/:id', async (req, res) => {
+  const { id } = req.params;
+  const {
+    nome,
+    cognome,
+    email,
+    telefono,
+    note,
+    attivo,
+    data_iscrizione,
+    lezioni_effettuate,
+    lezioni_da_pagare,
+    totale_pagamenti,
+    ultimo_pagamento
+  } = req.body;
+
+  try {
+    const { rows } = await pool.query(
+      `UPDATE allievi SET
+        nome = $1,
+        cognome = $2,
+        email = $3,
+        telefono = $4,
+        note = $5,
+        attivo = $6,
+        data_iscrizione = $7,
+        lezioni_effettuate = $8,
+        lezioni_da_pagare = $9,
+        totale_pagamenti = $10,
+        ultimo_pagamento = $11
+       WHERE id = $12 RETURNING *`,
+      [nome, cognome, email, telefono, note, attivo, data_iscrizione, lezioni_effettuate, lezioni_da_pagare, totale_pagamenti, ultimo_pagamento, id]
+    );
+
+    if (rows.length === 0) return res.status(404).json({ error: 'Allievo non trovato' });
+    res.json(rows[0]);
+  } catch (err) {
+    console.error('Errore nell\'aggiornamento allievo:', err);
+    res.status(500).json({ error: 'Errore nell\'aggiornamento allievo' });
+  }
+});
+
+// DELETE allievo
+app.delete('/api/allievi/:id', async (req, res) => {
+  const { id } = req.params;
+  try {
+    const { rowCount } = await pool.query('DELETE FROM allievi WHERE id = $1', [id]);
+    if (rowCount === 0) return res.status(404).json({ error: 'Allievo non trovato' });
+    res.json({ message: 'Allievo eliminato' });
+  } catch (err) {
+    console.error('Errore nella cancellazione allievo:', err);
+    res.status(500).json({ error: 'Errore nella cancellazione allievo' });
+  }
+});
 
 
 
