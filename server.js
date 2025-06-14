@@ -127,7 +127,8 @@ app.delete('/api/insegnanti/:id', async (req, res) => {
 // GET tutte le lezioni
 app.get('/api/lezioni', async (req, res) => {
   try {
-    const { rows } = await pool.query('                                
+    const { rows } = await pool.query(`
+      SELECT 
         lezioni.id,
         lezioni.data,
         lezioni.ora_inizio,
@@ -144,10 +145,27 @@ app.get('/api/lezioni', async (req, res) => {
       LEFT JOIN insegnanti ON lezioni.id_insegnante = insegnanti.id
       LEFT JOIN allievi ON lezioni.id_allievo = allievi.id
     `);
-    res.json(rows);
+
+    const lezioniFormattate = rows.map(lezione => {
+      const data = lezione.data.toISOString().split('T')[0]; // yyyy-mm-dd
+      const start = `${data}T${lezione.ora_inizio}`;
+      const end = `${data}T${lezione.ora_fine}`;
+      const title = `${lezione.nome_allievo} ${lezione.cognome_allievo} (${lezione.nome_insegnante} ${lezione.cognome_insegnante})`;
+
+      return {
+        id: lezione.id,
+        title,
+        start,
+        end,
+        aula: lezione.aula,
+        stato: lezione.stato
+      };
+    });
+
+    res.json(lezioniFormattate);
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Errore nel recupero lezioni' });
+    console.error('Errore nel recupero lezioni formattate:', err);
+    res.status(500).json({ error: 'Errore nel recupero lezioni con orari' });
   }
 });
 
