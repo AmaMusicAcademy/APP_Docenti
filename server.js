@@ -278,12 +278,13 @@ app.get('/api/init-allievi', async (req, res) => {
         ultimo_pagamento DATE
       );
     `);
-    res.json({ message: 'Tabella allievi creata o già esistente.' });
+    res.json({ message: '✅ Tabella allievi creata o già esistente.' });
   } catch (err) {
     console.error('Errore nella creazione della tabella allievi:', err);
     res.status(500).json({ error: 'Errore nella creazione della tabella allievi' });
   }
 });
+
 
 ////////////////////////
 // ALLIEVI
