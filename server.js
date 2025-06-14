@@ -127,17 +127,33 @@ app.delete('/api/insegnanti/:id', async (req, res) => {
 // GET tutte le lezioni
 app.get('/api/lezioni', async (req, res) => {
   try {
-    const { rows } = await pool.query('SELECT * FROM lezioni');
-    
-    // Costruisci gli eventi per FullCalendar
+    const { rows } = await pool.query(`
+      SELECT 
+        lezioni.id,
+        lezioni.data,
+        lezioni.ora_inizio,
+        lezioni.ora_fine,
+        lezioni.aula,
+        lezioni.stato,
+        lezioni.id_insegnante,
+        lezioni.id_allievo,
+        i.nome AS nome_insegnante,
+        i.cognome AS cognome_insegnante
+      FROM lezioni
+      LEFT JOIN insegnanti i ON lezioni.id_insegnante = i.id
+    `);
+
+    // Converte in eventi
     const eventi = rows.map(lezione => {
-      const start = new Date(`${lezione.data}T${lezione.ora_inizio}`);
-      const end = new Date(`${lezione.data}T${lezione.ora_fine}`);
+      const dataSolo = lezione.data.toISOString().split('T')[0]; // se PostgreSQL restituisce come Date
+      const start = `${dataSolo}T${lezione.ora_inizio}`;
+      const end = `${dataSolo}T${lezione.ora_fine}`;
+
       return {
         id: lezione.id,
-        title: `Aula ${lezione.aula} (${lezione.stato})`,
+        title: `Lezione con ${lezione.nome_insegnante} ${lezione.cognome_insegnante} - Aula ${lezione.aula}`,
         start,
-        end
+        end,
       };
     });
 
@@ -147,7 +163,6 @@ app.get('/api/lezioni', async (req, res) => {
     res.status(500).json({ error: 'Errore nel recupero lezioni' });
   }
 });
-
 // GET una lezione
 app.get('/api/lezioni/:id', async (req, res) => {
   const { id } = req.params;
