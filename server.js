@@ -249,6 +249,16 @@ app.get('/api/insegnanti/:id/lezioni', async (req, res) => {
 ////////////////////////
 // ALLIEVI
 ////////////////////////
+app.get('/api/drop-allievi', async (req, res) => {
+  try {
+    await pool.query('DROP TABLE IF EXISTS allievi');
+    res.json({ message: 'Tabella allievi eliminata' });
+  } catch (err) {
+    console.error('Errore nell\'eliminazione della tabella allievi:', err);
+    res.status(500).json({ error: 'Errore nell\'eliminazione della tabella allievi' });
+  }
+});
+
 
 app.get('/api/init-allievi', async (req, res) => {
   try {
