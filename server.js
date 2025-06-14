@@ -315,7 +315,7 @@ app.post('/api/allievi', async (req, res) => {
     lezioni_effettuate = 0,
     lezioni_da_pagare = 0,
     totale_pagamenti = 0,
-    ultimo_pagamento
+    ultimo_pagamento = null
   } = req.body;
 
   try {
