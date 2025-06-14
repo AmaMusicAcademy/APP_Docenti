@@ -127,45 +127,24 @@ app.delete('/api/insegnanti/:id', async (req, res) => {
 // GET tutte le lezioni
 app.get('/api/lezioni', async (req, res) => {
   try {
-    const { rows } = await pool.query(`
-      SELECT 
-        lezioni.id,
-        lezioni.data,
-        lezioni.ora_inizio,
-        lezioni.ora_fine,
-        lezioni.aula,
-        lezioni.stato,
-        lezioni.id_insegnante,
-        lezioni.id_allievo,
-        insegnanti.nome AS nome_insegnante,
-        insegnanti.cognome AS cognome_insegnante,
-        allievi.nome AS nome_allievo,
-        allievi.cognome AS cognome_allievo
-      FROM lezioni
-      LEFT JOIN insegnanti ON lezioni.id_insegnante = insegnanti.id
-      LEFT JOIN allievi ON lezioni.id_allievo = allievi.id
-    `);
-
-    const lezioniFormattate = rows.map(lezione => {
-      const data = lezione.data.toISOString().split('T')[0]; // yyyy-mm-dd
-      const start = `${data}T${lezione.ora_inizio}`;
-      const end = `${data}T${lezione.ora_fine}`;
-      const title = `${lezione.nome_allievo} ${lezione.cognome_allievo} (${lezione.nome_insegnante} ${lezione.cognome_insegnante})`;
-
+    const { rows } = await pool.query('SELECT * FROM lezioni');
+    
+    // Costruisci gli eventi per FullCalendar
+    const eventi = rows.map(lezione => {
+      const start = new Date(`${lezione.data}T${lezione.ora_inizio}`);
+      const end = new Date(`${lezione.data}T${lezione.ora_fine}`);
       return {
         id: lezione.id,
-        title,
+        title: `Aula ${lezione.aula} (${lezione.stato})`,
         start,
-        end,
-        aula: lezione.aula,
-        stato: lezione.stato
+        end
       };
     });
 
-    res.json(lezioniFormattate);
+    res.json(eventi);
   } catch (err) {
-    console.error('Errore nel recupero lezioni formattate:', err);
-    res.status(500).json({ error: 'Errore nel recupero lezioni con orari' });
+    console.error('Errore nel recupero lezioni:', err);
+    res.status(500).json({ error: 'Errore nel recupero lezioni' });
   }
 });
 
