@@ -1,5 +1,3 @@
-
-
 const express = require('express');
 const cors = require('cors'); // 👈 Importa il pacchetto
 const { pool } = require('./db');
