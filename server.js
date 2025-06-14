@@ -151,6 +151,7 @@ app.get('/api/lezioni', async (req, res) => {
 
       return {
         id: lezione.id,
+        id_insegnante: lezione.id_insegnante,
         title: `Lezione con ${lezione.nome_insegnante} ${lezione.cognome_insegnante} - Aula ${lezione.aula}`,
         start,
         end,
