@@ -251,7 +251,7 @@ app.get('/api/insegnanti/:id/lezioni', async (req, res) => {
 ////////////////////////
 app.get('/api/drop-allievi', async (req, res) => {
   try {
-    await pool.query('DROP TABLE IF EXISTS allievi');
+    await pool.query('DROP TABLE IF EXISTS allievi CASCADE');
     res.json({ message: 'Tabella allievi eliminata' });
   } catch (err) {
     console.error('Errore nell\'eliminazione della tabella allievi:', err);
