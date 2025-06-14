@@ -250,22 +250,31 @@ app.get('/api/insegnanti/:id/lezioni', async (req, res) => {
 // ALLIEVI
 ////////////////////////
 
-// ✅ Crea tabella allievi (se non già esistente)
 app.get('/api/init-allievi', async (req, res) => {
   try {
     await pool.query(`
       CREATE TABLE IF NOT EXISTS allievi (
         id SERIAL PRIMARY KEY,
-        nome VARCHAR(50),
-        cognome VARCHAR(50)
+        nome VARCHAR(100) NOT NULL,
+        cognome VARCHAR(100) NOT NULL,
+        email VARCHAR(150),
+        telefono VARCHAR(30),
+        note TEXT,
+        attivo BOOLEAN DEFAULT TRUE,
+        data_iscrizione DATE DEFAULT CURRENT_DATE,
+        lezioni_effettuate INTEGER DEFAULT 0,
+        lezioni_da_pagare INTEGER DEFAULT 0,
+        totale_pagamenti NUMERIC(10,2) DEFAULT 0,
+        ultimo_pagamento DATE
       );
     `);
     res.json({ message: 'Tabella allievi creata o già esistente.' });
   } catch (err) {
-    console.error('Errore creazione tabella allievi:', err);
-    res.status(500).json({ error: 'Errore nella creazione tabella allievi' });
+    console.error('Errore nella creazione della tabella allievi:', err);
+    res.status(500).json({ error: 'Errore nella creazione della tabella allievi' });
   }
 });
+
 
 
 
