@@ -246,6 +246,30 @@ app.get('/api/insegnanti/:id/lezioni', async (req, res) => {
   }
 });
 
+////////////////////////
+// ALLIEVI
+////////////////////////
+
+// ✅ Crea tabella allievi (se non già esistente)
+app.get('/api/init-allievi', async (req, res) => {
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS allievi (
+        id SERIAL PRIMARY KEY,
+        nome VARCHAR(50),
+        cognome VARCHAR(50)
+      );
+    `);
+    res.json({ message: 'Tabella allievi creata o già esistente.' });
+  } catch (err) {
+    console.error('Errore creazione tabella allievi:', err);
+    res.status(500).json({ error: 'Errore nella creazione tabella allievi' });
+  }
+});
+
+
+
+
 
 ////////////////////////
 // AVVIO SERVER
