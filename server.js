@@ -335,6 +335,23 @@ app.get('/api/init-allievi', async (req, res) => {
   }
 });
 
+app.get('/api/alter-allievi', async (req, res) => {
+  try {
+    await pool.query(`
+      ALTER TABLE allievi
+      DROP COLUMN IF EXISTS lezioni_effettuate,
+      DROP COLUMN IF EXISTS lezioni_da_pagare,
+      DROP COLUMN IF EXISTS totale_pagamenti,
+      DROP COLUMN IF EXISTS ultimo_pagamento;
+    `);
+    res.json({ message: '✅ Colonne obsolete rimosse dalla tabella allievi.' });
+  } catch (err) {
+    console.error('Errore nella modifica tabella allievi:', err);
+    res.status(500).json({ error: 'Errore nella modifica tabella allievi' });
+  }
+});
+
+
 
 ////////////////////////
 // ALLIEVI
