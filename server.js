@@ -124,8 +124,56 @@ app.delete('/api/insegnanti/:id', async (req, res) => {
 // LEZIONI
 ////////////////////////
 
-// GET tutte le lezioni
+// GET tutte le lezioni con info insegnante e allievo
 app.get('/api/lezioni', async (req, res) => {
+  try {
+    const { rows } = await pool.query(`
+      SELECT 
+        lezioni.id,
+        lezioni.data,
+        lezioni.ora_inizio,
+        lezioni.ora_fine,
+        lezioni.aula,
+        lezioni.stato,
+        lezioni.id_insegnante,
+        lezioni.id_allievo,
+        i.nome AS nome_insegnante,
+        i.cognome AS cognome_insegnante,
+        a.nome AS nome_allievo,
+        a.cognome AS cognome_allievo
+      FROM lezioni
+      LEFT JOIN insegnanti i ON lezioni.id_insegnante = i.id
+      LEFT JOIN allievi a ON lezioni.id_allievo = a.id
+    `);
+
+    const eventi = rows.map(lezione => {
+      const dataSolo = lezione.data.toISOString().split('T')[0];
+      const start = `${dataSolo}T${lezione.ora_inizio}`;
+      const end = `${dataSolo}T${lezione.ora_fine}`;
+
+      return {
+        id: lezione.id,
+        id_insegnante: lezione.id_insegnante,
+        id_allievo: lezione.id_allievo,
+        nome_allievo: lezione.nome_allievo,
+        cognome_allievo: lezione.cognome_allievo,
+        aula: lezione.aula,
+        stato: lezione.stato,
+        title: `Lezione con ${lezione.nome_allievo || 'Allievo'} - Aula ${lezione.aula}`,
+        start,
+        end,
+      };
+    });
+
+    res.json(eventi);
+  } catch (err) {
+    console.error('Errore nel recupero lezioni:', err);
+    res.status(500).json({ error: 'Errore nel recupero lezioni' });
+  }
+});
+
+// GET tutte le lezioni
+/*app.get('/api/lezioni', async (req, res) => {
   try {
     const { rows } = await pool.query(`
       SELECT 
@@ -163,7 +211,9 @@ app.get('/api/lezioni', async (req, res) => {
     console.error('Errore nel recupero lezioni:', err);
     res.status(500).json({ error: 'Errore nel recupero lezioni' });
   }
-});
+}); */
+
+
 // GET una lezione
 app.get('/api/lezioni/:id', async (req, res) => {
   const { id } = req.params;
