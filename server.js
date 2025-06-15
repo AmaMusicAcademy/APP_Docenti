@@ -451,7 +451,50 @@ app.delete('/api/allievi/:id', async (req, res) => {
   }
 });
 
+// PATCH stato attivo/inattivo allievo
+app.patch('/api/allievi/:id/stato', async (req, res) => {
+  const { id } = req.params;
+  const { attivo } = req.body;
 
+  try {
+    const { rowCount } = await pool.query(
+      'UPDATE allievi SET attivo = $1 WHERE id = $2',
+      [attivo, id]
+    );
+
+    if (rowCount === 0) return res.status(404).json({ error: 'Allievo non trovato' });
+    res.status(204).send();
+  } catch (err) {
+    console.error('Errore nell\'aggiornamento stato allievo:', err);
+    res.status(500).json({ error: 'Errore nell\'aggiornamento stato allievo' });
+  }
+});
+
+// GET lezioni future di un allievo
+app.get('/api/allievi/:id/lezioni-future', async (req, res) => {
+  const { id } = req.params;
+
+  try {
+    const { rows } = await pool.query(`
+      SELECT 
+        l.data,
+        l.ora_inizio,
+        l.ora_fine,
+        l.aula,
+        i.nome AS nome_insegnante,
+        i.cognome AS cognome_insegnante
+      FROM lezioni l
+      LEFT JOIN insegnanti i ON l.id_insegnante = i.id
+      WHERE l.id_allievo = $1 AND l.data >= CURRENT_DATE
+      ORDER BY l.data, l.ora_inizio
+    `, [id]);
+
+    res.json(rows);
+  } catch (err) {
+    console.error('Errore nel recupero lezioni future per allievo:', err);
+    res.status(500).json({ error: 'Errore nel recupero lezioni future' });
+  }
+});
 
 
 
