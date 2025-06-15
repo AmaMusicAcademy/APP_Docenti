@@ -124,6 +124,37 @@ app.delete('/api/insegnanti/:id', async (req, res) => {
 // LEZIONI
 ////////////////////////
 
+
+// GET aule occupate in una data e fascia oraria
+app.get('/api/lezioni/occupazione-aule', async (req, res) => {
+  const { data, ora_inizio, ora_fine } = req.query;
+
+  if (!data || !ora_inizio || !ora_fine) {
+    return res.status(400).json({ error: 'Parametri mancanti: data, ora_inizio e ora_fine sono obbligatori' });
+  }
+
+  try {
+    const query = `
+      SELECT DISTINCT aula
+      FROM lezioni
+      WHERE data = $1
+        AND (
+          ($2 < ora_fine AND $3 > ora_inizio) -- sovrapposizione oraria
+        )
+    `;
+    const values = [data, ora_inizio, ora_fine];
+
+    const { rows } = await pool.query(query, values);
+    const auleOccupate = rows.map(r => r.aula);
+
+    res.json(auleOccupate);
+  } catch (err) {
+    console.error('Errore nel recupero aule occupate:', err);
+    res.status(500).json({ error: 'Errore nel recupero aule occupate' });
+  }
+});
+
+
 // GET tutte le lezioni con info insegnante e allievo
 app.get('/api/lezioni', async (req, res) => {
   try {
