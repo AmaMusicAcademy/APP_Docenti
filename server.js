@@ -522,6 +522,76 @@ app.get('/api/allievi/:id/lezioni-effettuate', async (req, res) => {
   }
 });
 
+////////////////////////
+// GESTIONE PAGAMENTI
+////////////////////////
+
+app.get('/api/init-pagamenti', async (req, res) => {
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS pagamenti_mensili (
+        id SERIAL PRIMARY KEY,
+        allievo_id INTEGER REFERENCES allievi(id) ON DELETE CASCADE,
+        anno INTEGER NOT NULL,
+        mese INTEGER NOT NULL,
+        data_pagamento DATE DEFAULT CURRENT_DATE,
+        UNIQUE (allievo_id, anno, mese)
+      );
+    `);
+    res.json({ message: '✅ Tabella pagamenti_mensili creata (o già esistente).' });
+  } catch (err) {
+    console.error('Errore nella creazione della tabella pagamenti_mensili:', err);
+    res.status(500).json({ error: 'Errore nella creazione tabella pagamenti' });
+  }
+});
+
+app.get('/api/allievi/:id/pagamenti', async (req, res) => {
+  const { id } = req.params;
+  try {
+    const { rows } = await pool.query(`
+      SELECT anno, mese, data_pagamento
+      FROM pagamenti_mensili
+      WHERE allievo_id = $1
+      ORDER BY anno DESC, mese DESC
+    `, [id]);
+    res.json(rows);
+  } catch (err) {
+    console.error('Errore nel recupero pagamenti:', err);
+    res.status(500).json({ error: 'Errore nel recupero pagamenti' });
+  }
+});
+
+app.post('/api/allievi/:id/pagamenti', async (req, res) => {
+  const { id } = req.params;
+  const { anno, mese } = req.body;
+  try {
+    const { rows } = await pool.query(`
+      INSERT INTO pagamenti_mensili (allievo_id, anno, mese)
+      VALUES ($1, $2, $3)
+      ON CONFLICT (allievo_id, anno, mese) DO NOTHING
+      RETURNING *
+    `, [id, anno, mese]);
+    res.status(201).json(rows[0] || { message: 'Pagamento già registrato' });
+  } catch (err) {
+    console.error('Errore nel salvataggio pagamento:', err);
+    res.status(500).json({ error: 'Errore nel salvataggio pagamento' });
+  }
+});
+
+app.delete('/api/allievi/:id/pagamenti', async (req, res) => {
+  const { id } = req.params;
+  const { anno, mese } = req.query;
+  try {
+    const result = await pool.query(`
+      DELETE FROM pagamenti_mensili
+      WHERE allievo_id = $1 AND anno = $2 AND mese = $3
+    `, [id, anno, mese]);
+    res.json({ deleted: result.rowCount });
+  } catch (err) {
+    console.error('Errore nella cancellazione pagamento:', err);
+    res.status(500).json({ error: 'Errore nella cancellazione pagamento' });
+  }
+});
 
 
 ////////////////////////
