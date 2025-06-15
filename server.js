@@ -496,6 +496,32 @@ app.get('/api/allievi/:id/lezioni-future', async (req, res) => {
   }
 });
 
+//COUNT LEZIONI EFFETTUATE ALLIEVO
+app.get('/api/allievi/:id/lezioni-effettuate', async (req, res) => {
+  const { id } = req.params;
+  const { start, end } = req.query;
+
+  let query = `SELECT COUNT(*) FROM lezioni WHERE id_allievo = $1 AND stato = 'svolta'`;
+  const params = [id];
+
+  if (start) {
+    params.push(start);
+    query += ` AND data >= $${params.length}`;
+  }
+  if (end) {
+    params.push(end);
+    query += ` AND data <= $${params.length}`;
+  }
+
+  try {
+    const { rows } = await pool.query(query, params);
+    res.json({ count: parseInt(rows[0].count, 10) });
+  } catch (err) {
+    console.error('Errore nel conteggio lezioni effettuate:', err);
+    res.status(500).json({ error: 'Errore nel conteggio lezioni' });
+  }
+});
+
 
 
 ////////////////////////
