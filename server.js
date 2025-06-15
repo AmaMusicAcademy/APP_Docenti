@@ -385,25 +385,18 @@ app.post('/api/allievi', async (req, res) => {
   const {
     nome,
     cognome,
-    email,
-    telefono,
-    note,
-    attivo = true,
-    data_iscrizione,
-    lezioni_effettuate = 0,
-    lezioni_da_pagare = 0,
-    totale_pagamenti = 0,
-    ultimo_pagamento = null
+    email = '',
+    telefono = '',
+    note = '',
+    data_iscrizione = new Date().toISOString().split('T')[0] // formato YYYY-MM-DD
   } = req.body;
 
   try {
     const { rows } = await pool.query(
       `INSERT INTO allievi (
-        nome, cognome, email, telefono, note, attivo,
-        data_iscrizione, lezioni_effettuate, lezioni_da_pagare,
-        totale_pagamenti, ultimo_pagamento
-      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
-      [nome, cognome, email, telefono, note, attivo, data_iscrizione, lezioni_effettuate, lezioni_da_pagare, totale_pagamenti, ultimo_pagamento]
+        nome, cognome, email, telefono, note, data_iscrizione
+      ) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
+      [nome, cognome, email, telefono, note, data_iscrizione]
     );
     res.status(201).json(rows[0]);
   } catch (err) {
@@ -418,15 +411,10 @@ app.put('/api/allievi/:id', async (req, res) => {
   const {
     nome,
     cognome,
-    email,
-    telefono,
-    note,
-    attivo,
-    data_iscrizione,
-    lezioni_effettuate,
-    lezioni_da_pagare,
-    totale_pagamenti,
-    ultimo_pagamento
+    email = '',
+    telefono = '',
+    note = '',
+    data_iscrizione
   } = req.body;
 
   try {
@@ -437,14 +425,9 @@ app.put('/api/allievi/:id', async (req, res) => {
         email = $3,
         telefono = $4,
         note = $5,
-        attivo = $6,
-        data_iscrizione = $7,
-        lezioni_effettuate = $8,
-        lezioni_da_pagare = $9,
-        totale_pagamenti = $10,
-        ultimo_pagamento = $11
-       WHERE id = $12 RETURNING *`,
-      [nome, cognome, email, telefono, note, attivo, data_iscrizione, lezioni_effettuate, lezioni_da_pagare, totale_pagamenti, ultimo_pagamento, id]
+        data_iscrizione = $6
+       WHERE id = $7 RETURNING *`,
+      [nome, cognome, email, telefono, note, data_iscrizione, id]
     );
 
     if (rows.length === 0) return res.status(404).json({ error: 'Allievo non trovato' });
