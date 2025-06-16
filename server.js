@@ -182,8 +182,7 @@ app.get('/api/lezioni/occupazione-aule', async (req, res) => {
   }
 });
 
-
-// GET tutte le lezioni con info insegnante e allievo
+//GET lezioni
 app.get('/api/lezioni', async (req, res) => {
   try {
     const { rows } = await pool.query(`
@@ -194,6 +193,7 @@ app.get('/api/lezioni', async (req, res) => {
         lezioni.ora_fine,
         lezioni.aula,
         lezioni.stato,
+        lezioni.motivazione, -- 👈 AGGIUNTO
         lezioni.id_insegnante,
         lezioni.id_allievo,
         i.nome AS nome_insegnante,
@@ -218,6 +218,7 @@ app.get('/api/lezioni', async (req, res) => {
         cognome_allievo: lezione.cognome_allievo,
         aula: lezione.aula,
         stato: lezione.stato,
+        motivazione: lezione.motivazione, // 👈 AGGIUNTO
         title: `Lezione con ${lezione.nome_allievo || 'Allievo'} - Aula ${lezione.aula}`,
         start,
         end,
@@ -231,53 +232,16 @@ app.get('/api/lezioni', async (req, res) => {
   }
 });
 
-// GET tutte le lezioni
-/*app.get('/api/lezioni', async (req, res) => {
-  try {
-    const { rows } = await pool.query(`
-      SELECT 
-        lezioni.id,
-        lezioni.data,
-        lezioni.ora_inizio,
-        lezioni.ora_fine,
-        lezioni.aula,
-        lezioni.stato,
-        lezioni.id_insegnante,
-        lezioni.id_allievo,
-        i.nome AS nome_insegnante,
-        i.cognome AS cognome_insegnante
-      FROM lezioni
-      LEFT JOIN insegnanti i ON lezioni.id_insegnante = i.id
-    `);
-
-    // Converte in eventi
-    const eventi = rows.map(lezione => {
-      const dataSolo = lezione.data.toISOString().split('T')[0]; // se PostgreSQL restituisce come Date
-      const start = `${dataSolo}T${lezione.ora_inizio}`;
-      const end = `${dataSolo}T${lezione.ora_fine}`;
-
-      return {
-        id: lezione.id,
-        id_insegnante: lezione.id_insegnante,
-        title: `Lezione con ${lezione.nome_insegnante} ${lezione.cognome_insegnante} - Aula ${lezione.aula}`,
-        start,
-        end,
-      };
-    });
-
-    res.json(eventi);
-  } catch (err) {
-    console.error('Errore nel recupero lezioni:', err);
-    res.status(500).json({ error: 'Errore nel recupero lezioni' });
-  }
-}); */
 
 
 // GET una lezione
 app.get('/api/lezioni/:id', async (req, res) => {
   const { id } = req.params;
   try {
-    const { rows } = await pool.query('SELECT * FROM lezioni WHERE id = $1', [id]);
+    const { rows } = await pool.query(
+      'SELECT * FROM lezioni WHERE id = $1',
+      [id]
+    );
     if (rows.length === 0) return res.status(404).json({ error: 'Lezione non trovata' });
     res.json(rows[0]);
   } catch (err) {
@@ -285,15 +249,26 @@ app.get('/api/lezioni/:id', async (req, res) => {
   }
 });
 
-// POST nuova lezione
+//POST lezioni
 app.post('/api/lezioni', async (req, res) => {
-  const { id_insegnante, id_allievo, data, ora_inizio, ora_fine, aula, stato } = req.body;
+  const {
+    id_insegnante,
+    id_allievo,
+    data,
+    ora_inizio,
+    ora_fine,
+    aula,
+    stato,
+    motivazione = ''
+  } = req.body;
+
   try {
     const { rows } = await pool.query(
       `INSERT INTO lezioni 
-        (id_insegnante, id_allievo, data, ora_inizio, ora_fine, aula, stato) 
-        VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
-      [id_insegnante, id_allievo, data, ora_inizio, ora_fine, aula, stato]
+        (id_insegnante, id_allievo, data, ora_inizio, ora_fine, aula, stato, motivazione) 
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8) 
+        RETURNING *`,
+      [id_insegnante, id_allievo, data, ora_inizio, ora_fine, aula, stato, motivazione]
     );
     res.status(201).json(rows[0]);
   } catch (err) {
@@ -302,10 +277,20 @@ app.post('/api/lezioni', async (req, res) => {
   }
 });
 
-// PUT modifica lezione
+//PUT lezioni
 app.put('/api/lezioni/:id', async (req, res) => {
   const { id } = req.params;
-  const { id_insegnante, id_allievo, data, ora_inizio, ora_fine, aula, stato } = req.body;
+  const {
+    id_insegnante,
+    id_allievo,
+    data,
+    ora_inizio,
+    ora_fine,
+    aula,
+    stato,
+    motivazione = ''
+  } = req.body;
+
   try {
     const { rows } = await pool.query(
       `UPDATE lezioni SET 
@@ -315,10 +300,12 @@ app.put('/api/lezioni/:id', async (req, res) => {
         ora_inizio = $4, 
         ora_fine = $5, 
         aula = $6, 
-        stato = $7
-       WHERE id = $8 RETURNING *`,
-      [id_insegnante, id_allievo, data, ora_inizio, ora_fine, aula, stato, id]
+        stato = $7,
+        motivazione = $8
+       WHERE id = $9 RETURNING *`,
+      [id_insegnante, id_allievo, data, ora_inizio, ora_fine, aula, stato, motivazione, id]
     );
+
     if (rows.length === 0) return res.status(404).json({ error: 'Lezione non trovata' });
     res.json(rows[0]);
   } catch (err) {
@@ -326,6 +313,7 @@ app.put('/api/lezioni/:id', async (req, res) => {
     res.status(500).json({ error: 'Errore nell\'aggiornamento lezione' });
   }
 });
+
 
 // DELETE lezione
 app.delete('/api/lezioni/:id', async (req, res) => {
