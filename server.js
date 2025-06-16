@@ -585,7 +585,8 @@ app.get('/api/allievi/:id/lezioni-future', async (req, res) => {
       WHERE l.id_allievo = $1
         AND (
           (l.stato = 'svolta' AND l.data >= CURRENT_DATE)
-          OR (l.stato = 'rimandata' AND l.data IS NULL)
+          OR (l.stato = 'rimandata'
+          )
         )
       ORDER BY l.data NULLS LAST, l.ora_inizio
     `, [id]);
