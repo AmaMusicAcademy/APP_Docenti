@@ -584,7 +584,7 @@ app.get('/api/allievi/:id/lezioni-future', async (req, res) => {
       LEFT JOIN insegnanti i ON l.id_insegnante = i.id
       WHERE l.id_allievo = $1
         AND (
-          (l.stato = 'programmata' AND l.data >= CURRENT_DATE)
+          (l.stato = 'svolta' AND l.data >= CURRENT_DATE)
           OR (l.stato = 'rimandata' AND l.data IS NULL)
         )
       ORDER BY l.data NULLS LAST, l.ora_inizio
