@@ -124,6 +124,23 @@ app.delete('/api/insegnanti/:id', async (req, res) => {
 // LEZIONI
 ////////////////////////
 
+// Lezioni rimandate per un insegnante
+app.get('/api/insegnanti/:id/lezioni-rimandate', async (req, res) => {
+  const { id } = req.params;
+  try {
+    const { rows } = await pool.query(`
+      SELECT 
+        id, data, ora_inizio, ora_fine, aula, stato, id_allievo
+      FROM lezioni
+      WHERE id_insegnante = $1 AND stato = 'rimandata'
+      ORDER BY data
+    `, [id]);
+    res.json(rows);
+  } catch (err) {
+    console.error('Errore nel recupero lezioni rimandate:', err);
+    res.status(500).json({ error: 'Errore nel recupero lezioni rimandate' });
+  }
+});
 
 // GET aule occupate in una data e fascia oraria
 app.get('/api/lezioni/occupazione-aule', async (req, res) => {
