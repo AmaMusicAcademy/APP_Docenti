@@ -10,6 +10,17 @@ app.use(cors()); // 👈 Abilita CORS per tutte le origini
 
 app.use(express.json());
 
+app.get('/api/alter-lezioni', async (req, res) => {
+  try {
+    await pool.query(`ALTER TABLE lezioni ADD COLUMN IF NOT EXISTS motivazione TEXT`);
+    res.json({ message: '✅ Colonna motivazione aggiunta alla tabella lezioni.' });
+  } catch (err) {
+    console.error('Errore nella modifica della tabella lezioni:', err);
+    res.status(500).json({ error: 'Errore nella modifica tabella lezioni' });
+  }
+});
+
+
 /*app.get('/api/drop-lezioni', async (req, res) => {
   try {
     await pool.query('DROP TABLE IF EXISTS lezioni');
