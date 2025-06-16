@@ -530,11 +530,16 @@ app.get('/api/allievi/:id/lezioni-future', async (req, res) => {
         l.ora_fine,
         l.aula,
         i.nome AS nome_insegnante,
-        i.cognome AS cognome_insegnante
+        i.cognome AS cognome_insegnante,
+        l.stato
       FROM lezioni l
       LEFT JOIN insegnanti i ON l.id_insegnante = i.id
-      WHERE l.id_allievo = $1 AND l.data >= CURRENT_DATE
-      ORDER BY l.data, l.ora_inizio
+      WHERE l.id_allievo = $1
+        AND (
+          (l.stato = 'programmata' AND l.data >= CURRENT_DATE)
+          OR (l.stato = 'rimandata' AND l.data IS NULL)
+        )
+      ORDER BY l.data NULLS LAST, l.ora_inizio
     `, [id]);
 
     res.json(rows);
@@ -543,6 +548,7 @@ app.get('/api/allievi/:id/lezioni-future', async (req, res) => {
     res.status(500).json({ error: 'Errore nel recupero lezioni future' });
   }
 });
+
 
 //COUNT LEZIONI EFFETTUATE ALLIEVO
 app.get('/api/allievi/:id/lezioni-effettuate', async (req, res) => {
