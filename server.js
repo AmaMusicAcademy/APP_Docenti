@@ -21,16 +21,6 @@ app.get('/api/alter-lezioni', async (req, res) => {
 });
 
 
-/*app.get('/api/drop-lezioni', async (req, res) => {
-  try {
-    await pool.query('DROP TABLE IF EXISTS lezioni');
-    res.json({ message: 'Tabella lezioni eliminata' });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Errore nell\'eliminazione della tabella lezioni' });
-  }
-});*/
-
 // ✅ Crea tabella lezioni
 app.get('/api/init-lezioni', async (req, res) => {
   try {
@@ -141,10 +131,20 @@ app.get('/api/insegnanti/:id/lezioni-rimandate', async (req, res) => {
   try {
     const { rows } = await pool.query(`
       SELECT 
-        id, data, ora_inizio, ora_fine, aula, stato, id_allievo
-      FROM lezioni
-      WHERE id_insegnante = $1 AND stato = 'rimandata'
-      ORDER BY data
+        l.id,
+        l.data,
+        l.ora_inizio,
+        l.ora_fine,
+        l.aula,
+        l.stato,
+        l.motivazione,
+        l.id_allievo,
+        a.nome AS nome_allievo,
+        a.cognome AS cognome_allievo
+      FROM lezioni l
+      LEFT JOIN allievi a ON l.id_allievo = a.id
+      WHERE l.id_insegnante = $1 AND l.stato = 'rimandata'
+      ORDER BY l.data
     `, [id]);
     res.json(rows);
   } catch (err) {
