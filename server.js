@@ -570,7 +570,7 @@ app.patch('/api/allievi/:id/stato', async (req, res) => {
   }
 });
 
-// GET lezioni future di un allievo
+/* GET lezioni future di un allievo
 app.get('/api/allievi/:id/lezioni-future', async (req, res) => {
   const { id } = req.params;
 
@@ -601,7 +601,44 @@ app.get('/api/allievi/:id/lezioni-future', async (req, res) => {
     console.error('Errore nel recupero lezioni future per allievo:', err);
     res.status(500).json({ error: 'Errore nel recupero lezioni future' });
   }
+});*/
+
+app.get('/api/allievi/:id/lezioni-future', async (req, res) => {
+  const { id } = req.params;
+
+  try {
+    const { rows } = await pool.query(`
+      SELECT 
+        l.id,
+        l.data,
+        l.ora_inizio,
+        l.ora_fine,
+        l.aula,
+        l.stato,
+        l.motivazione,
+        i.nome AS nome_insegnante,
+        i.cognome AS cognome_insegnante,
+        CASE 
+          WHEN l.stato = 'rimandata' AND l.data IS NOT NULL AND l.ora_inizio IS NOT NULL THEN true
+          ELSE false
+        END AS riprogrammata
+      FROM lezioni l
+      LEFT JOIN insegnanti i ON l.id_insegnante = i.id
+      WHERE l.id_allievo = $1
+        AND (
+          (l.stato = 'svolta' AND l.data >= CURRENT_DATE)
+          OR (l.stato = 'rimandata' AND l.data IS NOT NULL)
+        )
+      ORDER BY l.data NULLS LAST, l.ora_inizio
+    `, [id]);
+
+    res.json(rows);
+  } catch (err) {
+    console.error('Errore nel recupero lezioni future per allievo:', err);
+    res.status(500).json({ error: 'Errore nel recupero lezioni future' });
+  }
 });
+
 
 
 
