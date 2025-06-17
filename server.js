@@ -603,6 +603,20 @@ app.get('/api/allievi/:id/lezioni-future', async (req, res) => {
   }
 });*/
 
+app.get('/api/alter-lezioni-add-riprogrammata', async (req, res) => {
+  try {
+    await pool.query(`
+      ALTER TABLE lezioni
+      ADD COLUMN IF NOT EXISTS riprogrammata BOOLEAN DEFAULT FALSE;
+    `);
+    res.json({ message: '✅ Colonna riprogrammata aggiunta alla tabella lezioni.' });
+  } catch (err) {
+    console.error('Errore nella modifica della tabella lezioni:', err);
+    res.status(500).json({ error: 'Errore nella modifica della tabella lezioni' });
+  }
+});
+
+
 app.get('/api/allievi/:id/lezioni-future', async (req, res) => {
   const { id } = req.params;
 
