@@ -282,7 +282,7 @@ app.post('/api/lezioni', async (req, res) => {
   }
 });
 
-//PUT lezioni
+/*PUT lezioni
 app.put('/api/lezioni/:id', async (req, res) => {
   const { id } = req.params;
   const {
@@ -317,7 +317,47 @@ app.put('/api/lezioni/:id', async (req, res) => {
     console.error(err);
     res.status(500).json({ error: 'Errore nell\'aggiornamento lezione' });
   }
+});*/
+
+// PUT modifica lezione (con supporto a riprogrammata)
+app.put('/api/lezioni/:id', async (req, res) => {
+  const { id } = req.params;
+  const {
+    id_insegnante,
+    id_allievo,
+    data,
+    ora_inizio,
+    ora_fine,
+    aula,
+    stato,
+    motivazione = '',
+    riprogrammata = false
+  } = req.body;
+
+  try {
+    const { rows } = await pool.query(
+      `UPDATE lezioni SET 
+        id_insegnante = $1, 
+        id_allievo = $2, 
+        data = $3, 
+        ora_inizio = $4, 
+        ora_fine = $5, 
+        aula = $6, 
+        stato = $7,
+        motivazione = $8,
+        riprogrammata = $9
+       WHERE id = $10 RETURNING *`,
+      [id_insegnante, id_allievo, data, ora_inizio, ora_fine, aula, stato, motivazione, riprogrammata, id]
+    );
+
+    if (rows.length === 0) return res.status(404).json({ error: 'Lezione non trovata' });
+    res.json(rows[0]);
+  } catch (err) {
+    console.error('Errore nell\'aggiornamento lezione:', err);
+    res.status(500).json({ error: 'Errore nell\'aggiornamento lezione' });
+  }
 });
+
 
 
 // DELETE lezione
