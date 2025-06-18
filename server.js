@@ -670,18 +670,15 @@ app.get('/api/allievi/:id/lezioni-future', async (req, res) => {
         l.aula,
         l.stato,
         l.motivazione,
+        l.riprogrammata,
         i.nome AS nome_insegnante,
-        i.cognome AS cognome_insegnante,
-        CASE 
-          WHEN l.stato = 'rimandata' AND l.data IS NOT NULL AND l.ora_inizio IS NOT NULL THEN true
-          ELSE false
-        END AS riprogrammata
+        i.cognome AS cognome_insegnante
       FROM lezioni l
       LEFT JOIN insegnanti i ON l.id_insegnante = i.id
       WHERE l.id_allievo = $1
         AND (
           (l.stato = 'svolta' AND l.data >= CURRENT_DATE)
-          OR (l.stato = 'rimandata' AND l.data IS NOT NULL)
+          OR (l.stato = 'rimandata')
         )
       ORDER BY l.data NULLS LAST, l.ora_inizio
     `, [id]);
@@ -692,6 +689,7 @@ app.get('/api/allievi/:id/lezioni-future', async (req, res) => {
     res.status(500).json({ error: 'Errore nel recupero lezioni future' });
   }
 });
+
 
 
 
