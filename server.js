@@ -694,6 +694,7 @@ app.get('/api/allievi/:id/lezioni-future', async (req, res) => {
 
 
 
+
 //COUNT LEZIONI EFFETTUATE ALLIEVO
 app.get('/api/allievi/:id/lezioni-effettuate', async (req, res) => {
   const { id } = req.params;
