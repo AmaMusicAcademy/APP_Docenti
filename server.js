@@ -587,10 +587,9 @@ app.put('/api/allievi/:id', async (req, res) => {
         email = $3,
         telefono = $4,
         note = $5,
-        data_iscrizione = $6,
-        quota_mensile = $7
-       WHERE id = $8 RETURNING *`,
-      [nome, cognome, email, telefono, note, data_iscrizione, quota_mensile, id]
+        quota_mensile = $6
+       WHERE id = $7 RETURNING *`,
+      [nome, cognome, email, telefono, note, quota_mensile, id]
     );
 
     if (rows.length === 0) return res.status(404).json({ error: 'Allievo non trovato' });
