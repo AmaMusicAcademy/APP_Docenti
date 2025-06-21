@@ -391,6 +391,21 @@ app.get('/api/insegnanti/:id/lezioni', async (req, res) => {
 ////////////////////////
 // ALLIEVI
 ////////////////////////
+
+app.get('/api/alter-allievi-add-quota', async (req, res) => {
+  try {
+    await pool.query(`
+      ALTER TABLE allievi
+      ADD COLUMN IF NOT EXISTS quota_mensile NUMERIC(10,2) DEFAULT 0;
+    `);
+    res.json({ message: '✅ Colonna quota_mensile aggiunta alla tabella allievi.' });
+  } catch (err) {
+    console.error('Errore nella modifica della tabella allievi:', err);
+    res.status(500).json({ error: 'Errore nella modifica della tabella allievi' });
+  }
+});
+
+
 app.get('/api/drop-allievi', async (req, res) => {
   try {
     await pool.query('DROP TABLE IF EXISTS allievi CASCADE');
