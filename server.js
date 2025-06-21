@@ -601,15 +601,16 @@ app.post('/api/allievi', async (req, res) => {
     email = '',
     telefono = '',
     note = '',
-    data_iscrizione = new Date().toISOString().split('T')[0] // formato YYYY-MM-DD
+    data_iscrizione = new Date().toISOString().split('T')[0],
+    quota_mensile = 0
   } = req.body;
 
   try {
     const { rows } = await pool.query(
       `INSERT INTO allievi (
-        nome, cognome, email, telefono, note, data_iscrizione
-      ) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
-      [nome, cognome, email, telefono, note, data_iscrizione]
+        nome, cognome, email, telefono, note, data_iscrizione, quota_mensile
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
+      [nome, cognome, email, telefono, note, data_iscrizione, quota_mensile]
     );
     res.status(201).json(rows[0]);
   } catch (err) {
@@ -617,6 +618,7 @@ app.post('/api/allievi', async (req, res) => {
     res.status(500).json({ error: 'Errore nella creazione allievo' });
   }
 });
+
 
 // PUT modifica allievo
 app.put('/api/allievi/:id', async (req, res) => {
@@ -627,7 +629,8 @@ app.put('/api/allievi/:id', async (req, res) => {
     email = '',
     telefono = '',
     note = '',
-    data_iscrizione
+    data_iscrizione,
+    quota_mensile = 0
   } = req.body;
 
   try {
@@ -638,9 +641,10 @@ app.put('/api/allievi/:id', async (req, res) => {
         email = $3,
         telefono = $4,
         note = $5,
-        data_iscrizione = $6
-       WHERE id = $7 RETURNING *`,
-      [nome, cognome, email, telefono, note, data_iscrizione, id]
+        data_iscrizione = $6,
+        quota_mensile = $7
+       WHERE id = $8 RETURNING *`,
+      [nome, cognome, email, telefono, note, data_iscrizione, quota_mensile, id]
     );
 
     if (rows.length === 0) return res.status(404).json({ error: 'Allievo non trovato' });
@@ -650,6 +654,7 @@ app.put('/api/allievi/:id', async (req, res) => {
     res.status(500).json({ error: 'Errore nell\'aggiornamento allievo' });
   }
 });
+
 
 // DELETE allievo
 app.delete('/api/allievi/:id', async (req, res) => {
