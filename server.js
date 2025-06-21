@@ -459,59 +459,6 @@ app.get('/api/alter-allievi', async (req, res) => {
 });
 
 
-
-////////////////////////
-// ALLIEVI
-////////////////////////
-/*
-// GET conteggio lezioni per stato (svolte, annullate, rimandate) in un intervallo
-app.get('/api/allievi/:id/conteggio-lezioni', async (req, res) => {
-  const { id } = req.params;
-  const { start, end } = req.query;
-
-  const baseQuery = `
-    SELECT stato, COUNT(*) 
-    FROM lezioni 
-    WHERE id_allievo = $1
-  `;
-  const conditions = [];
-  const params = [id];
-
-  if (start) {
-    conditions.push(`data >= $${params.length + 1}`);
-    params.push(start);
-  }
-
-  if (end) {
-    conditions.push(`data <= $${params.length + 1}`);
-    params.push(end);
-  }
-
-  const whereClause = conditions.length > 0 ? ` AND ${conditions.join(' AND ')}` : '';
-
-  try {
-    const { rows } = await pool.query(`${baseQuery} ${whereClause} GROUP BY stato`, params);
-
-    const result = {
-      svolte: 0,
-      annullate: 0,
-      rimandate: 0
-    };
-
-    for (const row of rows) {
-      if (row.stato === 'svolta') result.svolte = parseInt(row.count, 10);
-      else if (row.stato === 'annullata') result.annullate = parseInt(row.count, 10);
-      else if (row.stato === 'rimandata') result.rimandate = parseInt(row.count, 10);
-    }
-
-    res.json(result);
-  } catch (err) {
-    console.error('Errore nel conteggio lezioni per stato:', err);
-    res.status(500).json({ error: 'Errore nel conteggio lezioni' });
-  }
-});
-*/
-
 // GET conteggio lezioni per stato + riprogrammate
 app.get('/api/allievi/:id/conteggio-lezioni', async (req, res) => {
   const { id } = req.params;
@@ -629,7 +576,6 @@ app.put('/api/allievi/:id', async (req, res) => {
     email = '',
     telefono = '',
     note = '',
-    data_iscrizione,
     quota_mensile = 0
   } = req.body;
 
