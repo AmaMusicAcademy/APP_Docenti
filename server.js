@@ -282,44 +282,7 @@ app.post('/api/lezioni', async (req, res) => {
   }
 });
 
-/*PUT lezioni
-app.put('/api/lezioni/:id', async (req, res) => {
-  const { id } = req.params;
-  const {
-    id_insegnante,
-    id_allievo,
-    data,
-    ora_inizio,
-    ora_fine,
-    aula,
-    stato,
-    motivazione = ''
-  } = req.body;
-
-  try {
-    const { rows } = await pool.query(
-      `UPDATE lezioni SET 
-        id_insegnante = $1, 
-        id_allievo = $2, 
-        data = $3, 
-        ora_inizio = $4, 
-        ora_fine = $5, 
-        aula = $6, 
-        stato = $7,
-        motivazione = $8
-       WHERE id = $9 RETURNING *`,
-      [id_insegnante, id_allievo, data, ora_inizio, ora_fine, aula, stato, motivazione, id]
-    );
-
-    if (rows.length === 0) return res.status(404).json({ error: 'Lezione non trovata' });
-    res.json(rows[0]);
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Errore nell\'aggiornamento lezione' });
-  }
-});*/
-
-// PUT modifica lezione (con supporto a riprogrammata)
+// PUT modifica lezione con controllo aula (esclude la lezione stessa)
 app.put('/api/lezioni/:id', async (req, res) => {
   const { id } = req.params;
   const {
@@ -335,8 +298,28 @@ app.put('/api/lezioni/:id', async (req, res) => {
   } = req.body;
 
   try {
-    const { rows } = await pool.query(
-      `UPDATE lezioni SET 
+    // ✅ Controlla conflitto solo se aula e orari sono definiti
+    if (data && ora_inizio && ora_fine && aula) {
+      const conflictQuery = `
+        SELECT 1 FROM lezioni
+        WHERE id != $1
+          AND data = $2
+          AND aula = $3
+          AND ($4 < ora_fine AND $5 > ora_inizio)
+        LIMIT 1
+      `;
+      const conflictValues = [id, data, aula, ora_inizio, ora_fine];
+      const conflictResult = await pool.query(conflictQuery, conflictValues);
+
+      if (conflictResult.rows.length > 0) {
+        return res.status(400).json({
+          error: 'L\'aula selezionata è già occupata nella data/ora indicata.',
+        });
+      }
+    }
+
+    const updateQuery = `
+      UPDATE lezioni SET 
         id_insegnante = $1, 
         id_allievo = $2, 
         data = $3, 
@@ -346,17 +329,35 @@ app.put('/api/lezioni/:id', async (req, res) => {
         stato = $7,
         motivazione = $8,
         riprogrammata = $9
-       WHERE id = $10 RETURNING *`,
-      [id_insegnante, id_allievo, data, ora_inizio, ora_fine, aula, stato, motivazione, riprogrammata, id]
-    );
+      WHERE id = $10
+      RETURNING *
+    `;
+    const updateValues = [
+      id_insegnante,
+      id_allievo,
+      data,
+      ora_inizio,
+      ora_fine,
+      aula,
+      stato,
+      motivazione,
+      riprogrammata,
+      id,
+    ];
 
-    if (rows.length === 0) return res.status(404).json({ error: 'Lezione non trovata' });
+    const { rows } = await pool.query(updateQuery, updateValues);
+
+    if (rows.length === 0) {
+      return res.status(404).json({ error: 'Lezione non trovata' });
+    }
+
     res.json(rows[0]);
   } catch (err) {
     console.error('Errore nell\'aggiornamento lezione:', err);
     res.status(500).json({ error: 'Errore nell\'aggiornamento lezione' });
   }
 });
+
 
 
 
