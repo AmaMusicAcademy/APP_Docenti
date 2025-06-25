@@ -155,6 +155,37 @@ app.get('/api/insegnanti/:id/lezioni-rimandate', async (req, res) => {
 
 // GET aule occupate in una data e fascia oraria
 app.get('/api/lezioni/occupazione-aule', async (req, res) => {
+  const { data, ora_inizio, ora_fine, escludi_id } = req.query;
+
+  if (!data || !ora_inizio || !ora_fine) {
+    return res.status(400).json({ error: 'Parametri mancanti: data, ora_inizio e ora_fine sono obbligatori' });
+  }
+
+  try {
+    let query = `
+      SELECT DISTINCT aula
+      FROM lezioni
+      WHERE data = $1
+        AND ($2 < ora_fine AND $3 > ora_inizio)
+    `;
+    const values = [data, ora_inizio, ora_fine];
+
+    if (escludi_id) {
+      query += ` AND id != $4`;
+      values.push(escludi_id);
+    }
+
+    const { rows } = await pool.query(query, values);
+    const auleOccupate = rows.map(r => r.aula);
+
+    res.json(auleOccupate);
+  } catch (err) {
+    console.error('Errore nel recupero aule occupate:', err);
+    res.status(500).json({ error: 'Errore nel recupero aule occupate' });
+  }
+});
+
+/*app.get('/api/lezioni/occupazione-aule', async (req, res) => {
   const { data, ora_inizio, ora_fine } = req.query;
 
   if (!data || !ora_inizio || !ora_fine) {
@@ -180,7 +211,7 @@ app.get('/api/lezioni/occupazione-aule', async (req, res) => {
     console.error('Errore nel recupero aule occupate:', err);
     res.status(500).json({ error: 'Errore nel recupero aule occupate' });
   }
-});
+});*/
 
 
 // ✅ GET tutte le lezioni con info insegnante e allievo
