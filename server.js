@@ -847,6 +847,29 @@ app.delete('/api/allievi/:id/pagamenti', async (req, res) => {
   }
 });
 
+// FIX: aggiorna lezioni rimandate con data/orari validi come "riprogrammate = true"
+app.get('/api/fix-riprogrammate', async (req, res) => {
+  try {
+    const result = await pool.query(`
+      UPDATE lezioni
+      SET riprogrammata = TRUE
+      WHERE stato = 'rimandata'
+        AND data IS NOT NULL
+        AND ora_inizio IS NOT NULL
+        AND ora_fine IS NOT NULL
+        AND riprogrammata IS DISTINCT FROM TRUE
+    `);
+
+    res.json({
+      message: `✅ ${result.rowCount} lezioni aggiornate con riprogrammata = TRUE`
+    });
+  } catch (err) {
+    console.error('Errore nella correzione lezioni riprogrammate:', err);
+    res.status(500).json({ error: 'Errore nella correzione lezioni riprogrammate' });
+  }
+});
+
+
 
 ////////////////////////
 // AVVIO SERVER
