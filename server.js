@@ -921,6 +921,18 @@ app.get('/api/fix-riprogrammate', async (req, res) => {
   }
 });
 
+app.delete('/api/reset-database', async (req, res) => {
+  try {
+    await pool.query('DELETE FROM lezioni');
+    await pool.query('DELETE FROM pagamenti_mensili');
+    await pool.query('DELETE FROM allievi');
+    await pool.query('DELETE FROM insegnanti');
+    res.json({ message: '✅ Tutti i dati sono stati eliminati con successo.' });
+  } catch (err) {
+    console.error('Errore durante la pulizia del database:', err);
+    res.status(500).json({ error: 'Errore nella pulizia del database' });
+  }
+});
 
 
 ////////////////////////
