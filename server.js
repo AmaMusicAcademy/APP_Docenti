@@ -215,7 +215,7 @@ app.get('/api/lezioni/occupazione-aule', async (req, res) => {
 
 
 // ✅ GET tutte le lezioni con info insegnante e allievo
-app.get('/api/lezioni', async (req, res) => {
+/*app.get('/api/lezioni', async (req, res) => {
   try {
     const { rows } = await pool.query(`
       SELECT 
@@ -265,12 +265,9 @@ app.get('/api/lezioni', async (req, res) => {
     console.error('Errore nel recupero lezioni:', err);
     res.status(500).json({ error: 'Errore nel recupero lezioni' });
   }
-});
+});*/
 
 
-
-
-// GET una lezione
 app.get('/api/lezioni', async (req, res) => {
   try {
     const { rows } = await pool.query(`
@@ -324,8 +321,8 @@ app.get('/api/lezioni', async (req, res) => {
   }
 });
 
-
-/*app.get('/api/lezioni/:id', async (req, res) => {
+// GET una lezione
+app.get('/api/lezioni/:id', async (req, res) => {
   const { id } = req.params;
   try {
     const { rows } = await pool.query(
@@ -337,7 +334,7 @@ app.get('/api/lezioni', async (req, res) => {
   } catch (err) {
     res.status(500).json({ error: 'Errore nel recupero lezione' });
   }
-});*/
+});
 
 //POST lezioni
 
