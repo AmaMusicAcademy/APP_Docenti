@@ -298,20 +298,23 @@ app.get('/api/lezioni', async (req, res) => {
         const start = `${dataSolo}T${lezione.ora_inizio}`;
         const end = `${dataSolo}T${lezione.ora_fine}`;
 
-        return {
-          id: lezione.id,
-          id_insegnante: lezione.id_insegnante,
-          id_allievo: lezione.id_allievo,
-          nome_allievo: lezione.nome_allievo,
-          cognome_allievo: lezione.cognome_allievo,
-          aula: lezione.aula,
-          stato: lezione.stato,
-          motivazione: lezione.motivazione,
-          riprogrammata: lezione.riprogrammata, // ✅ aggiunto
-          title: `Lezione con ${lezione.nome_allievo || 'Allievo'} - Aula ${lezione.aula}`,
-          start,
-          end,
-        };
+return {
+  id: lezione.id,
+  id_insegnante: lezione.id_insegnante,
+  id_allievo: lezione.id_allievo,
+  nome_allievo: lezione.nome_allievo,
+  cognome_allievo: lezione.cognome_allievo,
+  aula: lezione.aula,
+  stato: lezione.stato,
+  motivazione: lezione.motivazione,
+  riprogrammata: lezione.riprogrammata,
+  title: `Lezione con ${lezione.nome_allievo || 'Allievo'} - Aula ${lezione.aula}`,
+  start,
+  end,
+  data: lezione.data, // 👈 AGGIUNTO
+  ora_inizio: lezione.ora_inizio, // 👈 AGGIUNTO
+  ora_fine: lezione.ora_fine // 👈 AGGIUNTO
+};
       });
 
     res.json(eventi);
