@@ -271,21 +271,6 @@ app.get('/api/lezioni', async (req, res) => {
 
 
 // GET una lezione
-app.get('/api/lezioni/:id', async (req, res) => {
-  const { id } = req.params;
-  try {
-    const { rows } = await pool.query(
-      'SELECT * FROM lezioni WHERE id = $1',
-      [id]
-    );
-    if (rows.length === 0) return res.status(404).json({ error: 'Lezione non trovata' });
-    res.json(rows[0]);
-  } catch (err) {
-    res.status(500).json({ error: 'Errore nel recupero lezione' });
-  }
-});
-
-//POST lezioni
 app.get('/api/lezioni', async (req, res) => {
   try {
     const { rows } = await pool.query(`
@@ -340,7 +325,23 @@ app.get('/api/lezioni', async (req, res) => {
 });
 
 
-/*app.post('/api/lezioni', async (req, res) => {
+/*app.get('/api/lezioni/:id', async (req, res) => {
+  const { id } = req.params;
+  try {
+    const { rows } = await pool.query(
+      'SELECT * FROM lezioni WHERE id = $1',
+      [id]
+    );
+    if (rows.length === 0) return res.status(404).json({ error: 'Lezione non trovata' });
+    res.json(rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: 'Errore nel recupero lezione' });
+  }
+});*/
+
+//POST lezioni
+
+app.post('/api/lezioni', async (req, res) => {
   const {
     id_insegnante,
     id_allievo,
@@ -365,7 +366,7 @@ app.get('/api/lezioni', async (req, res) => {
     console.error(err);
     res.status(500).json({ error: 'Errore nella creazione lezione' });
   }
-});*/
+});
 
 // PUT modifica lezione con controllo aula (esclude la lezione stessa)
 app.put('/api/lezioni/:id', async (req, res) => {
