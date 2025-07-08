@@ -185,88 +185,8 @@ app.get('/api/lezioni/occupazione-aule', async (req, res) => {
   }
 });
 
-/*app.get('/api/lezioni/occupazione-aule', async (req, res) => {
-  const { data, ora_inizio, ora_fine } = req.query;
-
-  if (!data || !ora_inizio || !ora_fine) {
-    return res.status(400).json({ error: 'Parametri mancanti: data, ora_inizio e ora_fine sono obbligatori' });
-  }
-
-  try {
-    const query = `
-      SELECT DISTINCT aula
-      FROM lezioni
-      WHERE data = $1
-        AND (
-          ($2 < ora_fine AND $3 > ora_inizio) -- sovrapposizione oraria
-        )
-    `;
-    const values = [data, ora_inizio, ora_fine];
-
-    const { rows } = await pool.query(query, values);
-    const auleOccupate = rows.map(r => r.aula);
-
-    res.json(auleOccupate);
-  } catch (err) {
-    console.error('Errore nel recupero aule occupate:', err);
-    res.status(500).json({ error: 'Errore nel recupero aule occupate' });
-  }
-});*/
-
 
 // ✅ GET tutte le lezioni con info insegnante e allievo
-/*app.get('/api/lezioni', async (req, res) => {
-  try {
-    const { rows } = await pool.query(`
-      SELECT 
-        lezioni.id,
-        lezioni.data,
-        lezioni.ora_inizio,
-        lezioni.ora_fine,
-        lezioni.aula,
-        lezioni.stato,
-        lezioni.motivazione,
-        lezioni.id_insegnante,
-        lezioni.id_allievo,
-        i.nome AS nome_insegnante,
-        i.cognome AS cognome_insegnante,
-        a.nome AS nome_allievo,
-        a.cognome AS cognome_allievo
-      FROM lezioni
-      LEFT JOIN insegnanti i ON lezioni.id_insegnante = i.id
-      LEFT JOIN allievi a ON lezioni.id_allievo = a.id
-    `);
-
-    // Filtra solo lezioni con data e orari validi
-    const eventi = rows
-      .filter(lezione => lezione.data && lezione.ora_inizio && lezione.ora_fine)
-      .map(lezione => {
-        const dataSolo = new Date(lezione.data).toISOString().split('T')[0];
-        const start = `${dataSolo}T${lezione.ora_inizio}`;
-        const end = `${dataSolo}T${lezione.ora_fine}`;
-
-        return {
-          id: lezione.id,
-          id_insegnante: lezione.id_insegnante,
-          id_allievo: lezione.id_allievo,
-          nome_allievo: lezione.nome_allievo,
-          cognome_allievo: lezione.cognome_allievo,
-          aula: lezione.aula,
-          stato: lezione.stato,
-          motivazione: lezione.motivazione,
-          title: `Lezione con ${lezione.nome_allievo || 'Allievo'} - Aula ${lezione.aula}`,
-          start,
-          end,
-        };
-      });
-
-    res.json(eventi);
-  } catch (err) {
-    console.error('Errore nel recupero lezioni:', err);
-    res.status(500).json({ error: 'Errore nel recupero lezioni' });
-  }
-});*/
-
 
 app.get('/api/lezioni', async (req, res) => {
   try {
@@ -720,39 +640,7 @@ app.patch('/api/allievi/:id/stato', async (req, res) => {
   }
 });
 
-/* GET lezioni future di un allievo
-app.get('/api/allievi/:id/lezioni-future', async (req, res) => {
-  const { id } = req.params;
-
-  try {
-    const { rows } = await pool.query(`
-      SELECT 
-        l.id,
-        l.data,
-        l.ora_inizio,
-        l.ora_fine,
-        l.aula,
-        l.stato,
-        l.motivazione,
-        i.nome AS nome_insegnante,
-        i.cognome AS cognome_insegnante
-      FROM lezioni l
-      LEFT JOIN insegnanti i ON l.id_insegnante = i.id
-      WHERE l.id_allievo = $1
-        AND (
-          (l.stato = 'svolta' AND l.data >= CURRENT_DATE)
-          OR (l.stato = 'rimandata')
-        )
-      ORDER BY l.data NULLS LAST, l.ora_inizio
-    `, [id]);
-
-    res.json(rows);
-  } catch (err) {
-    console.error('Errore nel recupero lezioni future per allievo:', err);
-    res.status(500).json({ error: 'Errore nel recupero lezioni future' });
-  }
-});*/
-
+// GET lezioni future di un allievo
 app.get('/api/alter-lezioni-add-riprogrammata', async (req, res) => {
   try {
     await pool.query(`
@@ -799,11 +687,6 @@ app.get('/api/allievi/:id/lezioni-future', async (req, res) => {
     res.status(500).json({ error: 'Errore nel recupero lezioni future' });
   }
 });
-
-
-
-
-
 
 //COUNT LEZIONI EFFETTUATE ALLIEVO
 app.get('/api/allievi/:id/lezioni-effettuate', async (req, res) => {
@@ -934,6 +817,75 @@ app.delete('/api/reset-database', async (req, res) => {
   } catch (err) {
     console.error('Errore durante la pulizia del database:', err);
     res.status(500).json({ error: 'Errore nella pulizia del database' });
+  }
+});
+
+// GET compenso mensile di un insegnante
+app.get('/api/insegnanti/:id/compenso', async (req, res) => {
+  const { id } = req.params;
+  const { mese } = req.query; // formato atteso: '2025-06'
+
+  if (!mese || !/^\d{4}-\d{2}$/.test(mese)) {
+    return res.status(400).json({ error: 'Parametro "mese" non valido. Usa formato YYYY-MM.' });
+  }
+
+  try {
+    const startDate = new Date(`${mese}-01`);
+    const endDate = new Date(startDate.getFullYear(), startDate.getMonth() + 1, 0); // ultimo giorno del mese
+
+    const result = await pool.query(`
+      SELECT data, ora_inizio, ora_fine, stato, riprogrammata
+      FROM lezioni
+      WHERE id_insegnante = $1
+        AND (
+          stato IN ('svolta', 'annullata') OR
+          (stato = 'rimandata' AND riprogrammata = TRUE)
+        )
+        AND DATE_TRUNC('month', data) = DATE_TRUNC('month', $2::DATE)
+    `, [id, startDate]);
+
+    let oreTotali = 0;
+    const compensoOrario = 15;
+
+    for (const row of result.rows) {
+      // Calcolo ore: fine - inizio
+      const inizio = row.ora_inizio;
+      const fine = row.ora_fine;
+
+      const ore =
+        (new Date(`1970-01-01T${fine}Z`) - new Date(`1970-01-01T${inizio}Z`)) /
+        (1000 * 60 * 60);
+
+      oreTotali += ore;
+    }
+
+    const compenso = Math.round(oreTotali * compensoOrario);
+
+    res.json({
+      mese,
+      lezioniPagate: result.rowCount,
+      oreTotali,
+      compenso
+    });
+  } catch (err) {
+    console.error('Errore nel calcolo compenso:', err);
+    res.status(500).json({ error: 'Errore nel calcolo compenso' });
+  }
+});
+
+
+
+//NUOVA TABELLA CON DATA ORIGINALE PER CALCOLO COMPENSO INSEGNANTI
+app.get('/api/alter-lezioni-add-data-originale', async (req, res) => {
+  try {
+    await pool.query(`
+      ALTER TABLE lezioni
+      ADD COLUMN IF NOT EXISTS data_originale DATE;
+    `);
+    res.json({ message: '✅ Colonna data_originale aggiunta alla tabella lezioni.' });
+  } catch (err) {
+    console.error('Errore nella modifica tabella lezioni:', err);
+    res.status(500).json({ error: 'Errore nella modifica tabella lezioni' });
   }
 });
 
