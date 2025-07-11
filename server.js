@@ -875,7 +875,7 @@ app.get('/api/insegnanti/:id/compenso', async (req, res) => {
 
 
 
-//NUOVA TABELLA CON DATA ORIGINALE PER CALCOLO COMPENSO INSEGNANTI
+//NUOVA TABELLA CON DATA ORIGINALE PER CALCOLO COMPENSO INSEGNANTIm
 app.get('/api/alter-lezioni-add-data-originale', async (req, res) => {
   try {
     await pool.query(`
