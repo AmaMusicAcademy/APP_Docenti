@@ -48,6 +48,7 @@ app.post('/api/login', async (req, res) => {
         id: insegnante.id,
         nome: insegnante.nome,
         cognome: insegnante.cognome,
+        username: insegnante.username,
         ruolo: 'insegnante'
       }
     });
