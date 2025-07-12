@@ -889,6 +889,21 @@ app.get('/api/alter-lezioni-add-data-originale', async (req, res) => {
   }
 });
 
+//Aggiornamento user e pw insegnanti
+app.get('/api/alter-insegnanti-auth', async (req, res) => {
+  try {
+    await pool.query(`
+      ALTER TABLE insegnanti
+      ADD COLUMN IF NOT EXISTS username TEXT UNIQUE,
+      ADD COLUMN IF NOT EXISTS password_hash TEXT
+    `);
+    res.json({ message: '✅ Colonne username e password_hash aggiunte a insegnanti' });
+  } catch (err) {
+    console.error('Errore nella modifica della tabella insegnanti:', err);
+    res.status(500).json({ error: 'Errore nella modifica tabella insegnanti' });
+  }
+});
+
 
 ////////////////////////
 // AVVIO SERVER
