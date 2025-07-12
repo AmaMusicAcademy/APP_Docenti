@@ -3,6 +3,7 @@ const cors = require('cors');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const { pool } = require('./db');
+const bcrypt = require('bcrypt');
 require('dotenv').config();
 
 const app = express();
@@ -117,6 +118,36 @@ app.get('/api/alter-insegnanti-auth', async (req, res) => {
     res.status(500).json({ error: 'Errore nella modifica tabella insegnanti' });
   }
 });
+
+// ⚠️ ENDPOINT TEMPORANEO per aggiornare user e password di un insegnante
+app.post('/api/setup-credentials', async (req, res) => {
+  const { nome, cognome, username, password } = req.body;
+
+  if (!nome || !cognome || !username || !password) {
+    return res.status(400).json({ error: 'Nome, cognome, username e password sono obbligatori' });
+  }
+
+  try {
+    const hash = await bcrypt.hash(password, 10);
+
+    const result = await pool.query(`
+      UPDATE insegnanti
+      SET username = $1, password_hash = $2
+      WHERE nome = $3 AND cognome = $4
+      RETURNING *
+    `, [username, hash, nome, cognome]);
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({ error: 'Insegnante non trovato' });
+    }
+
+    res.json({ message: 'Credenziali aggiornate', insegnante: result.rows[0] });
+  } catch (err) {
+    console.error('Errore durante aggiornamento credenziali:', err);
+    res.status(500).json({ error: 'Errore durante aggiornamento credenziali' });
+  }
+});
+
 
 //////////////////////////
 // AVVIO SERVER
