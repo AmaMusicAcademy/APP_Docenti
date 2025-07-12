@@ -1,75 +1,97 @@
 const express = require('express');
-const cors = require('cors'); // 👈 Importa il pacchetto
+const cors = require('cors');
+const bcrypt = require('bcrypt');
+const jwt = require('jsonwebtoken');
 const { pool } = require('./db');
 require('dotenv').config();
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+const JWT_SECRET = process.env.JWT_SECRET || 'supersegreto';
 
-app.use(cors()); // 👈 Abilita CORS per tutte le origini
-
+app.use(cors());
 app.use(express.json());
 
-app.get('/api/alter-lezioni', async (req, res) => {
+// Middleware per autenticazione
+function authenticateToken(req, res, next) {
+  const authHeader = req.headers['authorization'];
+  const token = authHeader && authHeader.split(' ')[1];
+  if (!token) return res.sendStatus(401);
+
+  jwt.verify(token, JWT_SECRET, (err, user) => {
+    if (err) return res.sendStatus(403);
+    req.user = user;
+    next();
+  });
+}
+
+//////////////////////////
+// LOGIN
+//////////////////////////
+
+app.post('/api/login', async (req, res) => {
+  const { username, password } = req.body;
+
   try {
-    await pool.query(`ALTER TABLE lezioni ADD COLUMN IF NOT EXISTS motivazione TEXT`);
-    res.json({ message: '✅ Colonna motivazione aggiunta alla tabella lezioni.' });
+    const result = await pool.query('SELECT * FROM insegnanti WHERE username = $1', [username]);
+    if (result.rows.length === 0) return res.status(401).json({ message: 'Credenziali non valide' });
+
+    const insegnante = result.rows[0];
+    const match = await bcrypt.compare(password, insegnante.password_hash);
+    if (!match) return res.status(401).json({ message: 'Credenziali non valide' });
+
+    const token = jwt.sign({ id: insegnante.id, ruolo: 'insegnante' }, JWT_SECRET, { expiresIn: '2h' });
+
+    res.json({
+      token,
+      utente: {
+        id: insegnante.id,
+        nome: insegnante.nome,
+        cognome: insegnante.cognome,
+        ruolo: 'insegnante'
+      }
+    });
   } catch (err) {
-    console.error('Errore nella modifica della tabella lezioni:', err);
-    res.status(500).json({ error: 'Errore nella modifica tabella lezioni' });
+    console.error('Errore login:', err);
+    res.status(500).json({ message: 'Errore server' });
   }
 });
 
+//////////////////////////
+// CREAZIONE INSEGNANTE con username/password
+//////////////////////////
 
-// ✅ Crea tabella lezioni
-app.get('/api/init-lezioni', async (req, res) => {
+app.post('/api/insegnanti', async (req, res) => {
+  const { nome, cognome } = req.body;
   try {
-    await pool.query(`
-      CREATE TABLE lezioni (
-  id SERIAL PRIMARY KEY,
-  id_insegnante INTEGER REFERENCES insegnanti(id),
-  id_allievo INTEGER,
-  data DATE,
-  ora_inizio TIME,
-  ora_fine TIME,
-  aula VARCHAR(50),
-  stato VARCHAR(20)
-);
-    `);
-    res.json({ message: 'Tabella lezioni creata o già esistente.' });
+    const username = `${nome[0].toLowerCase()}.${cognome.toLowerCase()}`;
+    const password = 'amamusic';
+    const password_hash = await bcrypt.hash(password, 10);
+
+    const { rows } = await pool.query(
+      'INSERT INTO insegnanti (nome, cognome, username, password_hash) VALUES ($1, $2, $3, $4) RETURNING *',
+      [nome, cognome, username, password_hash]
+    );
+
+    res.status(201).json({ ...rows[0], password_iniziale: password });
   } catch (err) {
-    console.error('Errore creazione tabella lezioni:', err);
-    res.status(500).json({ error: 'Errore nella creazione tabella lezioni' });
+    console.error('Errore creazione insegnante:', err);
+    res.status(500).json({ error: 'Errore nella creazione insegnante' });
   }
 });
 
+//////////////////////////
+// PROTEZIONE PROFILO INSEGNANTE
+//////////////////////////
 
-////////////////////////
-// ENDPOINT DI TEST
-////////////////////////
-app.get('/api/test', (req, res) => {
-  res.json({ message: 'API funzionante!' });
-});
+app.get('/api/insegnanti/:id', authenticateToken, async (req, res) => {
+  const { id } = req.params;
 
-////////////////////////
-// INSEGNANTI
-////////////////////////
-
-// GET tutti gli insegnanti
-app.get('/api/insegnanti', async (req, res) => {
-  try {
-    const { rows } = await pool.query('SELECT * FROM insegnanti');
-    res.json(rows);
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Errore nel recupero insegnanti' });
+  if (req.user.id != id && req.user.ruolo !== 'admin') {
+    return res.status(403).json({ error: 'Accesso non autorizzato' });
   }
-});
 
-// GET un insegnante
-app.get('/api/insegnanti/:id', async (req, res) => {
   try {
-    const { id } = req.params;
     const { rows } = await pool.query('SELECT * FROM insegnanti WHERE id = $1', [id]);
     if (rows.length === 0) return res.status(404).json({ error: 'Insegnante non trovato' });
     res.json(rows[0]);
@@ -78,818 +100,10 @@ app.get('/api/insegnanti/:id', async (req, res) => {
   }
 });
 
-// POST nuovo insegnante
-app.post('/api/insegnanti', async (req, res) => {
-  const { nome, cognome } = req.body;
-  try {
-    const { rows } = await pool.query(
-      'INSERT INTO insegnanti (nome, cognome) VALUES ($1, $2) RETURNING *',
-      [nome, cognome]
-    );
-    res.status(201).json(rows[0]);
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Errore nella creazione insegnante' });
-  }
-});
+//////////////////////////
+// AGGIUNTA COLONNE auth (per compatibilità con vecchie tabelle)
+//////////////////////////
 
-// PUT modifica insegnante
-app.put('/api/insegnanti/:id', async (req, res) => {
-  const { id } = req.params;
-  const { nome, cognome } = req.body;
-  try {
-    const { rows } = await pool.query(
-      'UPDATE insegnanti SET nome = $1, cognome = $2 WHERE id = $3 RETURNING *',
-      [nome, cognome, id]
-    );
-    if (rows.length === 0) return res.status(404).json({ error: 'Insegnante non trovato' });
-    res.json(rows[0]);
-  } catch (err) {
-    res.status(500).json({ error: 'Errore nell\'aggiornamento insegnante' });
-  }
-});
-
-// DELETE insegnante
-app.delete('/api/insegnanti/:id', async (req, res) => {
-  const { id } = req.params;
-  try {
-    const { rowCount } = await pool.query('DELETE FROM insegnanti WHERE id = $1', [id]);
-    if (rowCount === 0) return res.status(404).json({ error: 'Insegnante non trovato' });
-    res.json({ message: 'Insegnante eliminato' });
-  } catch (err) {
-    res.status(500).json({ error: 'Errore nella cancellazione insegnante' });
-  }
-});
-
-////////////////////////
-// LEZIONI
-////////////////////////
-
-// Lezioni rimandate per un insegnante
-app.get('/api/insegnanti/:id/lezioni-rimandate', async (req, res) => {
-  const { id } = req.params;
-  try {
-    const { rows } = await pool.query(`
-      SELECT 
-        l.id,
-        l.data,
-        l.ora_inizio,
-        l.ora_fine,
-        l.aula,
-        l.stato,
-        l.motivazione,
-        l.id_allievo,
-        a.nome AS nome_allievo,
-        a.cognome AS cognome_allievo
-      FROM lezioni l
-      LEFT JOIN allievi a ON l.id_allievo = a.id
-      WHERE l.id_insegnante = $1 AND l.stato = 'rimandata'
-      ORDER BY l.data
-    `, [id]);
-    res.json(rows);
-  } catch (err) {
-    console.error('Errore nel recupero lezioni rimandate:', err);
-    res.status(500).json({ error: 'Errore nel recupero lezioni rimandate' });
-  }
-});
-
-// GET aule occupate in una data e fascia oraria
-app.get('/api/lezioni/occupazione-aule', async (req, res) => {
-  const { data, ora_inizio, ora_fine, escludi_id } = req.query;
-
-  if (!data || !ora_inizio || !ora_fine) {
-    return res.status(400).json({ error: 'Parametri mancanti: data, ora_inizio e ora_fine sono obbligatori' });
-  }
-
-  try {
-    let query = `
-      SELECT DISTINCT aula
-      FROM lezioni
-      WHERE data = $1
-        AND ($2 < ora_fine AND $3 > ora_inizio)
-    `;
-    const values = [data, ora_inizio, ora_fine];
-
-    if (escludi_id) {
-      query += ` AND id != $4`;
-      values.push(escludi_id);
-    }
-
-    const { rows } = await pool.query(query, values);
-    const auleOccupate = rows.map(r => r.aula);
-
-    res.json(auleOccupate);
-  } catch (err) {
-    console.error('Errore nel recupero aule occupate:', err);
-    res.status(500).json({ error: 'Errore nel recupero aule occupate' });
-  }
-});
-
-
-// ✅ GET tutte le lezioni con info insegnante e allievo
-
-app.get('/api/lezioni', async (req, res) => {
-  try {
-    const { rows } = await pool.query(`
-      SELECT 
-        lezioni.id,
-        lezioni.data,
-        lezioni.ora_inizio,
-        lezioni.ora_fine,
-        lezioni.aula,
-        lezioni.stato,
-        lezioni.motivazione,
-        lezioni.riprogrammata, -- ✅ aggiunto
-        lezioni.id_insegnante,
-        lezioni.id_allievo,
-        i.nome AS nome_insegnante,
-        i.cognome AS cognome_insegnante,
-        a.nome AS nome_allievo,
-        a.cognome AS cognome_allievo
-      FROM lezioni
-      LEFT JOIN insegnanti i ON lezioni.id_insegnante = i.id
-      LEFT JOIN allievi a ON lezioni.id_allievo = a.id
-    `);
-
-    const eventi = rows
-      .filter(lezione => lezione.data && lezione.ora_inizio && lezione.ora_fine)
-      .map(lezione => {
-        const dataSolo = new Date(lezione.data).toISOString().split('T')[0];
-        const start = `${dataSolo}T${lezione.ora_inizio}`;
-        const end = `${dataSolo}T${lezione.ora_fine}`;
-
-return {
-  id: lezione.id,
-  id_insegnante: lezione.id_insegnante,
-  id_allievo: lezione.id_allievo,
-  nome_allievo: lezione.nome_allievo,
-  cognome_allievo: lezione.cognome_allievo,
-  aula: lezione.aula,
-  stato: lezione.stato,
-  motivazione: lezione.motivazione,
-  riprogrammata: lezione.riprogrammata,
-  title: `Lezione con ${lezione.nome_allievo || 'Allievo'} - Aula ${lezione.aula}`,
-  start,
-  end,
-  data: lezione.data, // 👈 AGGIUNTO
-  ora_inizio: lezione.ora_inizio, // 👈 AGGIUNTO
-  ora_fine: lezione.ora_fine // 👈 AGGIUNTO
-};
-      });
-
-    res.json(eventi);
-  } catch (err) {
-    console.error('Errore nel recupero lezioni:', err);
-    res.status(500).json({ error: 'Errore nel recupero lezioni' });
-  }
-});
-
-// GET una lezione
-app.get('/api/lezioni/:id', async (req, res) => {
-  const { id } = req.params;
-  try {
-    const { rows } = await pool.query(
-      'SELECT * FROM lezioni WHERE id = $1',
-      [id]
-    );
-    if (rows.length === 0) return res.status(404).json({ error: 'Lezione non trovata' });
-    res.json(rows[0]);
-  } catch (err) {
-    res.status(500).json({ error: 'Errore nel recupero lezione' });
-  }
-});
-
-//POST lezioni
-
-app.post('/api/lezioni', async (req, res) => {
-  const {
-    id_insegnante,
-    id_allievo,
-    data,
-    ora_inizio,
-    ora_fine,
-    aula,
-    stato,
-    motivazione = ''
-  } = req.body;
-
-  try {
-    const { rows } = await pool.query(
-      `INSERT INTO lezioni 
-        (id_insegnante, id_allievo, data, ora_inizio, ora_fine, aula, stato, motivazione) 
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8) 
-        RETURNING *`,
-      [id_insegnante, id_allievo, data, ora_inizio, ora_fine, aula, stato, motivazione]
-    );
-    res.status(201).json(rows[0]);
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Errore nella creazione lezione' });
-  }
-});
-
-// PUT modifica lezione con controllo aula (esclude la lezione stessa)
-app.put('/api/lezioni/:id', async (req, res) => {
-  const { id } = req.params;
-  const {
-    id_insegnante,
-    id_allievo,
-    data,
-    ora_inizio,
-    ora_fine,
-    aula,
-    stato,
-    motivazione = '',
-    riprogrammata = false
-  } = req.body;
-
-  try {
-    // ✅ Controlla conflitto solo se aula e orari sono definiti
-    if (data && ora_inizio && ora_fine && aula) {
-      const conflictQuery = `
-        SELECT 1 FROM lezioni
-        WHERE id != $1
-          AND data = $2
-          AND aula = $3
-          AND ($4 < ora_fine AND $5 > ora_inizio)
-        LIMIT 1
-      `;
-      const conflictValues = [id, data, aula, ora_inizio, ora_fine];
-      const conflictResult = await pool.query(conflictQuery, conflictValues);
-
-      if (conflictResult.rows.length > 0) {
-        return res.status(400).json({
-          error: 'L\'aula selezionata è già occupata nella data/ora indicata.',
-        });
-      }
-    }
-
-    const updateQuery = `
-      UPDATE lezioni SET 
-        id_insegnante = $1, 
-        id_allievo = $2, 
-        data = $3, 
-        ora_inizio = $4, 
-        ora_fine = $5, 
-        aula = $6, 
-        stato = $7,
-        motivazione = $8,
-        riprogrammata = $9
-      WHERE id = $10
-      RETURNING *
-    `;
-    const updateValues = [
-      id_insegnante,
-      id_allievo,
-      data,
-      ora_inizio,
-      ora_fine,
-      aula,
-      stato,
-      motivazione,
-      riprogrammata,
-      id,
-    ];
-
-    const { rows } = await pool.query(updateQuery, updateValues);
-
-    if (rows.length === 0) {
-      return res.status(404).json({ error: 'Lezione non trovata' });
-    }
-
-    res.json(rows[0]);
-  } catch (err) {
-    console.error('Errore nell\'aggiornamento lezione:', err);
-    res.status(500).json({ error: 'Errore nell\'aggiornamento lezione' });
-  }
-});
-
-
-
-
-// DELETE lezione
-app.delete('/api/lezioni/:id', async (req, res) => {
-  const { id } = req.params;
-  try {
-    const { rowCount } = await pool.query('DELETE FROM lezioni WHERE id = $1', [id]);
-    if (rowCount === 0) return res.status(404).json({ error: 'Lezione non trovata' });
-    res.json({ message: 'Lezione eliminata' });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Errore nella cancellazione lezione' });
-  }
-});
-
-// ✅ GET lezioni di un insegnante specifico
-app.get('/api/insegnanti/:id/lezioni', async (req, res) => {
-  const { id } = req.params;
-  try {
-    const { rows } = await pool.query(
-      'SELECT * FROM lezioni WHERE id_insegnante = $1',
-      [id]
-    );
-    res.json(rows);
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Errore nel recupero delle lezioni per l\'insegnante' });
-  }
-});
-
-////////////////////////
-// ALLIEVI
-///////////////////////
-
-app.get('/api/alter-allievi-add-quota', async (req, res) => {
-  try {
-    await pool.query(`
-      ALTER TABLE allievi
-      ADD COLUMN IF NOT EXISTS quota_mensile NUMERIC(10,2) DEFAULT 0;
-    `);
-    res.json({ message: '✅ Colonna quota_mensile aggiunta alla tabella allievi.' });
-  } catch (err) {
-    console.error('Errore nella modifica della tabella allievi:', err);
-    res.status(500).json({ error: 'Errore nella modifica della tabella allievi' });
-  }
-});
-
-
-app.get('/api/drop-allievi', async (req, res) => {
-  try {
-    await pool.query('DROP TABLE IF EXISTS allievi CASCADE');
-    res.json({ message: 'Tabella allievi eliminata' });
-  } catch (err) {
-    console.error('Errore nell\'eliminazione della tabella allievi:', err);
-    res.status(500).json({ error: 'Errore nell\'eliminazione della tabella allievi' });
-  }
-});
-
-
-app.get('/api/init-allievi', async (req, res) => {
-  try {
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS allievi (
-        id SERIAL PRIMARY KEY,
-        nome VARCHAR(100) NOT NULL,
-        cognome VARCHAR(100) NOT NULL,
-        email VARCHAR(150),
-        telefono VARCHAR(30),
-        note TEXT,
-        attivo BOOLEAN DEFAULT TRUE,
-        data_iscrizione DATE DEFAULT CURRENT_DATE,
-        lezioni_effettuate INTEGER DEFAULT 0,
-        lezioni_da_pagare INTEGER DEFAULT 0,
-        totale_pagamenti NUMERIC(10,2) DEFAULT 0,
-        ultimo_pagamento DATE
-      );
-    `);
-    res.json({ message: '✅ Tabella allievi creata o già esistente.' });
-  } catch (err) {
-    console.error('Errore nella creazione della tabella allievi:', err);
-    res.status(500).json({ error: 'Errore nella creazione della tabella allievi' });
-  }
-});
-
-app.get('/api/alter-allievi', async (req, res) => {
-  try {
-    await pool.query(`
-      ALTER TABLE allievi
-      DROP COLUMN IF EXISTS lezioni_effettuate,
-      DROP COLUMN IF EXISTS lezioni_da_pagare,
-      DROP COLUMN IF EXISTS totale_pagamenti,
-      DROP COLUMN IF EXISTS ultimo_pagamento;
-    `);
-    res.json({ message: '✅ Colonne obsolete rimosse dalla tabella allievi.' });
-  } catch (err) {
-    console.error('Errore nella modifica tabella allievi:', err);
-    res.status(500).json({ error: 'Errore nella modifica tabella allievi' });
-  }
-});
-
-
-// GET conteggio lezioni per stato + riprogrammate
-app.get('/api/allievi/:id/conteggio-lezioni', async (req, res) => {
-  const { id } = req.params;
-  const { start, end } = req.query;
-
-  const baseQuery = `
-    SELECT stato, riprogrammata, COUNT(*) 
-    FROM lezioni 
-    WHERE id_allievo = $1
-  `;
-  const conditions = [];
-  const params = [id];
-
-  if (start) {
-    conditions.push(`data >= $${params.length + 1}`);
-    params.push(start);
-  }
-
-  if (end) {
-    conditions.push(`data <= $${params.length + 1}`);
-    params.push(end);
-  }
-
-  const whereClause = conditions.length > 0 ? ` AND ${conditions.join(' AND ')}` : '';
-
-  try {
-    const { rows } = await pool.query(`
-      ${baseQuery} ${whereClause}
-      GROUP BY stato, riprogrammata
-    `, params);
-
-    const result = {
-      svolte: 0,
-      annullate: 0,
-      rimandate: 0,
-      riprogrammate: 0
-    };
-
-    for (const row of rows) {
-      const stato = row.stato;
-      const riprogrammata = row.riprogrammata;
-
-      if (stato === 'svolta') result.svolte += parseInt(row.count, 10);
-      else if (stato === 'annullata') result.annullate += parseInt(row.count, 10);
-      else if (stato === 'rimandata') {
-        if (riprogrammata) result.riprogrammate += parseInt(row.count, 10);
-        else result.rimandate += parseInt(row.count, 10);
-      }
-    }
-
-    res.json(result);
-  } catch (err) {
-    console.error('Errore nel conteggio lezioni per stato:', err);
-    res.status(500).json({ error: 'Errore nel conteggio lezioni' });
-  }
-});
-
-
-// GET tutti gli allievi
-app.get('/api/allievi', async (req, res) => {
-  try {
-    const { rows } = await pool.query('SELECT * FROM allievi ORDER BY cognome, nome');
-    res.json(rows);
-  } catch (err) {
-    console.error('Errore nel recupero allievi:', err);
-    res.status(500).json({ error: 'Errore nel recupero allievi' });
-  }
-});
-
-// GET un allievo per ID
-app.get('/api/allievi/:id', async (req, res) => {
-  const { id } = req.params;
-  try {
-    const { rows } = await pool.query('SELECT * FROM allievi WHERE id = $1', [id]);
-    if (rows.length === 0) return res.status(404).json({ error: 'Allievo non trovato' });
-    res.json(rows[0]);
-  } catch (err) {
-    res.status(500).json({ error: 'Errore nel recupero allievo' });
-  }
-});
-
-// POST nuovo allievo
-app.post('/api/allievi', async (req, res) => {
-  const {
-    nome,
-    cognome,
-    email = '',
-    telefono = '',
-    note = '',
-    data_iscrizione = new Date().toISOString().split('T')[0],
-    quota_mensile = 0
-  } = req.body;
-
-  try {
-    const { rows } = await pool.query(
-      `INSERT INTO allievi (
-        nome, cognome, email, telefono, note, data_iscrizione, quota_mensile
-      ) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
-      [nome, cognome, email, telefono, note, data_iscrizione, quota_mensile]
-    );
-    res.status(201).json(rows[0]);
-  } catch (err) {
-    console.error('Errore nella creazione allievo:', err);
-    res.status(500).json({ error: 'Errore nella creazione allievo' });
-  }
-});
-
-
-// PUT modifica allievo
-app.put('/api/allievi/:id', async (req, res) => {
-  const { id } = req.params;
-  const {
-    nome,
-    cognome,
-    email = '',
-    telefono = '',
-    note = '',
-    quota_mensile = 0
-  } = req.body;
-
-  try {
-    const { rows } = await pool.query(
-      `UPDATE allievi SET
-        nome = $1,
-        cognome = $2,
-        email = $3,
-        telefono = $4,
-        note = $5,
-        quota_mensile = $6
-       WHERE id = $7 RETURNING *`,
-      [nome, cognome, email, telefono, note, quota_mensile, id]
-    );
-
-    if (rows.length === 0) return res.status(404).json({ error: 'Allievo non trovato' });
-    res.json(rows[0]);
-  } catch (err) {
-    console.error('Errore nell\'aggiornamento allievo:', err);
-    res.status(500).json({ error: 'Errore nell\'aggiornamento allievo' });
-  }
-});
-
-
-// DELETE allievo
-app.delete('/api/allievi/:id', async (req, res) => {
-  const { id } = req.params;
-  try {
-    const { rowCount } = await pool.query('DELETE FROM allievi WHERE id = $1', [id]);
-    if (rowCount === 0) return res.status(404).json({ error: 'Allievo non trovato' });
-    res.json({ message: 'Allievo eliminato' });
-  } catch (err) {
-    console.error('Errore nella cancellazione allievo:', err);
-    res.status(500).json({ error: 'Errore nella cancellazione allievo' });
-  }
-});
-
-// PATCH stato attivo/inattivo allievo
-app.patch('/api/allievi/:id/stato', async (req, res) => {
-  const { id } = req.params;
-  const { attivo } = req.body;
-
-  try {
-    const { rowCount } = await pool.query(
-      'UPDATE allievi SET attivo = $1 WHERE id = $2',
-      [attivo, id]
-    );
-
-    if (rowCount === 0) return res.status(404).json({ error: 'Allievo non trovato' });
-    res.status(204).send();
-  } catch (err) {
-    console.error('Errore nell\'aggiornamento stato allievo:', err);
-    res.status(500).json({ error: 'Errore nell\'aggiornamento stato allievo' });
-  }
-});
-
-// GET lezioni future di un allievo
-app.get('/api/alter-lezioni-add-riprogrammata', async (req, res) => {
-  try {
-    await pool.query(`
-      ALTER TABLE lezioni
-      ADD COLUMN IF NOT EXISTS riprogrammata BOOLEAN DEFAULT FALSE;
-    `);
-    res.json({ message: '✅ Colonna riprogrammata aggiunta alla tabella lezioni.' });
-  } catch (err) {
-    console.error('Errore nella modifica della tabella lezioni:', err);
-    res.status(500).json({ error: 'Errore nella modifica della tabella lezioni' });
-  }
-});
-
-
-app.get('/api/allievi/:id/lezioni-future', async (req, res) => {
-  const { id } = req.params;
-
-  try {
-    const { rows } = await pool.query(`
-      SELECT 
-        l.id,
-        l.data,
-        l.ora_inizio,
-        l.ora_fine,
-        l.aula,
-        l.stato,
-        l.motivazione,
-        l.riprogrammata,
-        i.nome AS nome_insegnante,
-        i.cognome AS cognome_insegnante
-      FROM lezioni l
-      LEFT JOIN insegnanti i ON l.id_insegnante = i.id
-      WHERE l.id_allievo = $1
-        AND (
-          (l.stato = 'svolta' AND l.data >= CURRENT_DATE)
-          OR (l.stato = 'rimandata')
-        )
-      ORDER BY l.data NULLS LAST, l.ora_inizio
-    `, [id]);
-
-    res.json(rows);
-  } catch (err) {
-    console.error('Errore nel recupero lezioni future per allievo:', err);
-    res.status(500).json({ error: 'Errore nel recupero lezioni future' });
-  }
-});
-
-//COUNT LEZIONI EFFETTUATE ALLIEVO
-app.get('/api/allievi/:id/lezioni-effettuate', async (req, res) => {
-  const { id } = req.params;
-  const { start, end } = req.query;
-
-  let query = `SELECT COUNT(*) FROM lezioni WHERE id_allievo = $1 AND stato = 'svolta'`;
-  const params = [id];
-
-  if (start) {
-    params.push(start);
-    query += ` AND data >= $${params.length}`;
-  }
-  if (end) {
-    params.push(end);
-    query += ` AND data <= $${params.length}`;
-  }
-
-  try {
-    const { rows } = await pool.query(query, params);
-    res.json({ count: parseInt(rows[0].count, 10) });
-  } catch (err) {
-    console.error('Errore nel conteggio lezioni effettuate:', err);
-    res.status(500).json({ error: 'Errore nel conteggio lezioni' });
-  }
-});
-
-////////////////////////
-// GESTIONE PAGAMENTI
-////////////////////////
-
-app.get('/api/init-pagamenti', async (req, res) => {
-  try {
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS pagamenti_mensili (
-        id SERIAL PRIMARY KEY,
-        allievo_id INTEGER REFERENCES allievi(id) ON DELETE CASCADE,
-        anno INTEGER NOT NULL,
-        mese INTEGER NOT NULL,
-        data_pagamento DATE DEFAULT CURRENT_DATE,
-        UNIQUE (allievo_id, anno, mese)
-      );
-    `);
-    res.json({ message: '✅ Tabella pagamenti_mensili creata (o già esistente).' });
-  } catch (err) {
-    console.error('Errore nella creazione della tabella pagamenti_mensili:', err);
-    res.status(500).json({ error: 'Errore nella creazione tabella pagamenti' });
-  }
-});
-
-app.get('/api/allievi/:id/pagamenti', async (req, res) => {
-  const { id } = req.params;
-  try {
-    const { rows } = await pool.query(`
-      SELECT anno, mese, data_pagamento
-      FROM pagamenti_mensili
-      WHERE allievo_id = $1
-      ORDER BY anno DESC, mese DESC
-    `, [id]);
-    res.json(rows);
-  } catch (err) {
-    console.error('Errore nel recupero pagamenti:', err);
-    res.status(500).json({ error: 'Errore nel recupero pagamenti' });
-  }
-});
-
-app.post('/api/allievi/:id/pagamenti', async (req, res) => {
-  const { id } = req.params;
-  const { anno, mese } = req.body;
-  try {
-    const { rows } = await pool.query(`
-      INSERT INTO pagamenti_mensili (allievo_id, anno, mese)
-      VALUES ($1, $2, $3)
-      ON CONFLICT (allievo_id, anno, mese) DO NOTHING
-      RETURNING *
-    `, [id, anno, mese]);
-    res.status(201).json(rows[0] || { message: 'Pagamento già registrato' });
-  } catch (err) {
-    console.error('Errore nel salvataggio pagamento:', err);
-    res.status(500).json({ error: 'Errore nel salvataggio pagamento' });
-  }
-});
-
-app.delete('/api/allievi/:id/pagamenti', async (req, res) => {
-  const { id } = req.params;
-  const { anno, mese } = req.query;
-  try {
-    const result = await pool.query(`
-      DELETE FROM pagamenti_mensili
-      WHERE allievo_id = $1 AND anno = $2 AND mese = $3
-    `, [id, anno, mese]);
-    res.json({ deleted: result.rowCount });
-  } catch (err) {
-    console.error('Errore nella cancellazione pagamento:', err);
-    res.status(500).json({ error: 'Errore nella cancellazione pagamento' });
-  }
-});
-
-// FIX: aggiorna lezioni rimandate con data/orari validi come "riprogrammate = true"
-app.get('/api/fix-riprogrammate', async (req, res) => {
-  try {
-    const result = await pool.query(`
-      UPDATE lezioni
-      SET riprogrammata = TRUE
-      WHERE stato = 'rimandata'
-        AND data IS NOT NULL
-        AND ora_inizio IS NOT NULL
-        AND ora_fine IS NOT NULL
-        AND riprogrammata IS DISTINCT FROM TRUE
-    `);
-
-    res.json({
-      message: `✅ ${result.rowCount} lezioni aggiornate con riprogrammata = TRUE`
-    });
-  } catch (err) {
-    console.error('Errore nella correzione lezioni riprogrammate:', err);
-    res.status(500).json({ error: 'Errore nella correzione lezioni riprogrammate' });
-  }
-});
-
-app.delete('/api/reset-database', async (req, res) => {
-  try {
-    await pool.query('DELETE FROM lezioni');
-    await pool.query('DELETE FROM pagamenti_mensili');
-    await pool.query('DELETE FROM allievi');
-    await pool.query('DELETE FROM insegnanti');
-    res.json({ message: '✅ Tutti i dati sono stati eliminati con successo.' });
-  } catch (err) {
-    console.error('Errore durante la pulizia del database:', err);
-    res.status(500).json({ error: 'Errore nella pulizia del database' });
-  }
-});
-
-// GET compenso mensile di un insegnante
-app.get('/api/insegnanti/:id/compenso', async (req, res) => {
-  const { id } = req.params;
-  const { mese } = req.query; // formato atteso: '2025-06'
-
-  if (!mese || !/^\d{4}-\d{2}$/.test(mese)) {
-    return res.status(400).json({ error: 'Parametro "mese" non valido. Usa formato YYYY-MM.' });
-  }
-
-  try {
-    const startDate = new Date(`${mese}-01`);
-    const endDate = new Date(startDate.getFullYear(), startDate.getMonth() + 1, 0); // ultimo giorno del mese
-
-    const result = await pool.query(`
-      SELECT data, ora_inizio, ora_fine, stato, riprogrammata
-      FROM lezioni
-      WHERE id_insegnante = $1
-        AND (
-          stato IN ('svolta', 'annullata') OR
-          (stato = 'rimandata' AND riprogrammata = TRUE)
-        )
-        AND DATE_TRUNC('month', data) = DATE_TRUNC('month', $2::DATE)
-    `, [id, startDate]);
-
-    let oreTotali = 0;
-    const compensoOrario = 15;
-
-    for (const row of result.rows) {
-      // Calcolo ore: fine - inizio
-      const inizio = row.ora_inizio;
-      const fine = row.ora_fine;
-
-      const ore =
-        (new Date(`1970-01-01T${fine}Z`) - new Date(`1970-01-01T${inizio}Z`)) /
-        (1000 * 60 * 60);
-
-      oreTotali += ore;
-    }
-
-    const compenso = Math.round(oreTotali * compensoOrario);
-
-    res.json({
-      mese,
-      lezioniPagate: result.rowCount,
-      oreTotali,
-      compenso
-    });
-  } catch (err) {
-    console.error('Errore nel calcolo compenso:', err);
-    res.status(500).json({ error: 'Errore nel calcolo compenso' });
-  }
-});
-
-
-
-//NUOVA TABELLA CON DATA ORIGINALE PER CALCOLO COMPENSO INSEGNANTIm
-app.get('/api/alter-lezioni-add-data-originale', async (req, res) => {
-  try {
-    await pool.query(`
-      ALTER TABLE lezioni
-      ADD COLUMN IF NOT EXISTS data_originale DATE;
-    `);
-    res.json({ message: '✅ Colonna data_originale aggiunta alla tabella lezioni.' });
-  } catch (err) {
-    console.error('Errore nella modifica tabella lezioni:', err);
-    res.status(500).json({ error: 'Errore nella modifica tabella lezioni' });
-  }
-});
-
-//Aggiornamento user e pw insegnanti
 app.get('/api/alter-insegnanti-auth', async (req, res) => {
   try {
     await pool.query(`
@@ -904,10 +118,10 @@ app.get('/api/alter-insegnanti-auth', async (req, res) => {
   }
 });
 
-
-////////////////////////
+//////////////////////////
 // AVVIO SERVER
-////////////////////////
+//////////////////////////
+
 app.listen(PORT, () => {
   console.log(`Server in ascolto sulla porta ${PORT}`);
 });
