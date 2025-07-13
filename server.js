@@ -2,6 +2,9 @@ const express = require('express');
 const cors = require('cors');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
+const multer = require('multer');
+const path = require('path');
+const fs = require('fs');
 const { pool } = require('./db');
 require('dotenv').config();
 
@@ -11,6 +14,20 @@ const JWT_SECRET = process.env.JWT_SECRET || 'supersegreto';
 
 app.use(cors());
 app.use(express.json());
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, 'uploads/');
+  },
+  filename: (req, file, cb) => {
+    const ext = path.extname(file.originalname);
+    const filename = `avatar_${Date.now()}${ext}`;
+    cb(null, filename);
+  }
+});
+const upload = multer({ storage });
+
 
 // Middleware per autenticazione
 function authenticateToken(req, res, next) {
@@ -24,6 +41,40 @@ function authenticateToken(req, res, next) {
     next();
   });
 }
+
+//CARICARE AVATAR
+app.post('/api/avatar', upload.single('avatar'), async (req, res) => {
+  const token = req.headers.authorization?.split(' ')[1];
+  if (!token || !req.file) return res.status(400).json({ message: 'Token o file mancante' });
+
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET);
+    const id = decoded.id;
+
+    const avatarUrl = `/uploads/${req.file.filename}`;
+
+    await pool.query(
+      'UPDATE insegnanti SET avatar_url = $1 WHERE id = $2',
+      [avatarUrl, id]
+    );
+
+    res.json({ message: 'Avatar aggiornato', avatarUrl });
+  } catch (err) {
+    console.error('Errore upload avatar:', err);
+    res.status(500).json({ message: 'Errore server' });
+  }
+});
+
+app.post('/api/setup-avatar-column', async (req, res) => {
+  try {
+    await pool.query(`ALTER TABLE insegnanti ADD COLUMN IF NOT EXISTS avatar_url TEXT`);
+    res.json({ message: 'Colonna avatar_url aggiunta con successo' });
+  } catch (err) {
+    console.error('Errore creazione colonna avatar_url:', err);
+    res.status(500).json({ message: 'Errore nel setup' });
+  }
+});
+
 
 //////////////////////////
 // LOGIN
@@ -57,6 +108,41 @@ app.post('/api/login', async (req, res) => {
     res.status(500).json({ message: 'Errore server' });
   }
 });
+
+//////////////////////////
+// CAMBIO password
+//////////////////////////
+
+app.post('/api/cambia-password', async (req, res) => {
+  const token = req.headers.authorization?.split(' ')[1];
+  const { passwordAttuale, nuovaPassword } = req.body;
+
+  if (!token) return res.status(401).json({ message: 'Token mancante' });
+
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET);
+    const id = decoded.id;
+
+    // Verifica password attuale
+    const result = await pool.query('SELECT password_hash FROM insegnanti WHERE id = $1', [id]);
+    const hash = result.rows[0]?.password_hash;
+    const match = await bcrypt.compare(passwordAttuale, hash);
+
+    if (!match) {
+      return res.status(403).json({ message: 'Password attuale errata' });
+    }
+
+    // Hash nuova password
+    const nuovoHash = await bcrypt.hash(nuovaPassword, 10);
+    await pool.query('UPDATE insegnanti SET password_hash = $1 WHERE id = $2', [nuovoHash, id]);
+
+    res.json({ message: 'Password aggiornata con successo' });
+  } catch (err) {
+    console.error('Errore cambio password:', err);
+    res.status(500).json({ message: 'Errore server' });
+  }
+});
+
 
 //////////////////////////
 // CREAZIONE INSEGNANTE con username/password
