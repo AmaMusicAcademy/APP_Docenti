@@ -114,31 +114,24 @@ app.post('/api/login', async (req, res) => {
 //////////////////////////
 
 app.post('/api/cambia-password', async (req, res) => {
-  const token = req.headers.authorization?.split(' ')[1];
-  const { passwordAttuale, nuovaPassword } = req.body;
+  const { id, nuovaPassword } = req.body;
 
-  if (!token) return res.status(401).json({ message: 'Token mancante' });
+  if (!id || !nuovaPassword) {
+    return res.status(400).json({ message: 'Dati mancanti' });
+  }
 
   try {
-    const decoded = jwt.verify(token, JWT_SECRET);
-    const id = decoded.id;
+    const salt = await bcrypt.genSalt(10);
+    const hash = await bcrypt.hash(nuovaPassword, salt);
 
-    // Verifica password attuale
-    const result = await pool.query('SELECT password_hash FROM insegnanti WHERE id = $1', [id]);
-    const hash = result.rows[0]?.password_hash;
-    const match = await bcrypt.compare(passwordAttuale, hash);
-
-    if (!match) {
-      return res.status(403).json({ message: 'Password attuale errata' });
-    }
-
-    // Hash nuova password
-    const nuovoHash = await bcrypt.hash(nuovaPassword, 10);
-    await pool.query('UPDATE insegnanti SET password_hash = $1 WHERE id = $2', [nuovoHash, id]);
+    await pool.query(
+      'UPDATE insegnanti SET password_hash = $1 WHERE id = $2',
+      [hash, id]
+    );
 
     res.json({ message: 'Password aggiornata con successo' });
   } catch (err) {
-    console.error('Errore cambio password:', err);
+    console.error('Errore durante il cambio password:', err);
     res.status(500).json({ message: 'Errore server' });
   }
 });
