@@ -100,7 +100,8 @@ app.post('/api/login', async (req, res) => {
         nome: insegnante.nome,
         cognome: insegnante.cognome,
         username: insegnante.username,
-        ruolo: 'insegnante'
+        ruolo: 'insegnante',
+        avatar_url: insegnante.avatar_url || null
       }
     });
   } catch (err) {
