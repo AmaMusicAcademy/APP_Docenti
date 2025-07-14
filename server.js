@@ -285,6 +285,59 @@ app.get('/api/allievi/:id/conteggio-lezioni', async (req, res) => {
   }
 });
 
+// GET compenso mensile di un insegnante
+app.get('/api/insegnanti/:id/compenso', async (req, res) => {
+  const { id } = req.params;
+  const { mese } = req.query; // formato atteso: '2025-06'
+
+  if (!mese || !/^\d{4}-\d{2}$/.test(mese)) {
+    return res.status(400).json({ error: 'Parametro "mese" non valido. Usa formato YYYY-MM.' });
+  }
+
+  try {
+    const startDate = new Date(`${mese}-01`);
+    const endDate = new Date(startDate.getFullYear(), startDate.getMonth() + 1, 0); // ultimo giorno del mese
+
+    const result = await pool.query(`
+      SELECT data, ora_inizio, ora_fine, stato, riprogrammata
+      FROM lezioni
+      WHERE id_insegnante = $1
+        AND (
+          stato IN ('svolta', 'annullata') OR
+          (stato = 'rimandata' AND riprogrammata = TRUE)
+        )
+        AND DATE_TRUNC('month', data) = DATE_TRUNC('month', $2::DATE)
+    `, [id, startDate]);
+
+    let oreTotali = 0;
+    const compensoOrario = 15;
+
+    for (const row of result.rows) {
+      // Calcolo ore: fine - inizio
+      const inizio = row.ora_inizio;
+      const fine = row.ora_fine;
+
+      const ore =
+        (new Date(`1970-01-01T${fine}Z`) - new Date(`1970-01-01T${inizio}Z`)) /
+        (1000 * 60 * 60);
+
+      oreTotali += ore;
+    }
+
+    const compenso = Math.round(oreTotali * compensoOrario);
+
+    res.json({
+      mese,
+      lezioniPagate: result.rowCount,
+      oreTotali,
+      compenso
+    });
+  } catch (err) {
+    console.error('Errore nel calcolo compenso:', err);
+    res.status(500).json({ error: 'Errore nel calcolo compenso' });
+  }
+});
+
 //////////////////////////
 // AVVIO SERVER
 //////////////////////////
