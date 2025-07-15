@@ -12,7 +12,12 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const JWT_SECRET = process.env.JWT_SECRET || 'supersegreto';
 
-app.use(cors());
+//app.use(cors());
+app.use(cors({
+  origin: ["https://accademia-frontend.vercel.app"], // oppure "*" in sviluppo
+  credentials: true,
+}));
+
 app.use(express.json());
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
