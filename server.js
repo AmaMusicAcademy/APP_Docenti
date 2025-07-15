@@ -343,6 +343,29 @@ app.get('/api/insegnanti/:id/compenso', async (req, res) => {
   }
 });
 
+app.get('/api/insegnanti/:id/lezioni', authenticateToken, async (req, res) => {
+  const { id } = req.params;
+
+  if (req.user.id != id && req.user.ruolo !== 'admin') {
+    return res.status(403).json({ error: 'Accesso non autorizzato' });
+  }
+
+  try {
+    const { rows } = await pool.query(`
+      SELECT lezioni.*, allievi.nome AS nome_allievo, allievi.cognome AS cognome_allievo
+      FROM lezioni
+      LEFT JOIN allievi ON lezioni.id_allievo = allievi.id
+      WHERE lezioni.id_insegnante = $1
+    `, [id]);
+
+    res.json(rows);
+  } catch (err) {
+    console.error('Errore nel recupero lezioni insegnante:', err);
+    res.status(500).json({ error: 'Errore nel recupero lezioni' });
+  }
+});
+
+
 //////////////////////////
 // AVVIO SERVER
 //////////////////////////
