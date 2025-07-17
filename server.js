@@ -365,6 +365,58 @@ app.get('/api/insegnanti/:id/lezioni', authenticateToken, async (req, res) => {
   }
 });
 
+app.get('/api/setup-utenti', async (req, res) => {
+  try {
+    // Crea tabella utenti se non esiste
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS utenti (
+        id SERIAL PRIMARY KEY,
+        username VARCHAR(50) UNIQUE NOT NULL,
+        password TEXT NOT NULL,
+        ruolo VARCHAR(20) CHECK (ruolo IN ('admin', 'insegnante')) NOT NULL
+      );
+    `);
+
+    // Inserisci admin "admin"
+    const hashedAdminPassword = await bcrypt.hash('admin', 10);
+    await pool.query(
+      `INSERT INTO utenti (username, password, ruolo)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (username) DO NOTHING`,
+      ['admin', hashedAdminPassword, 'admin']
+    );
+
+    // Inserisci admin "segreteria"
+    const hashedSegreteria = await bcrypt.hash('amamusic', 10);
+    await pool.query(
+      `INSERT INTO utenti (username, password, ruolo)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (username) DO NOTHING`,
+      ['segreteria', hashedSegreteria, 'admin']
+    );
+
+    // Assegna ruolo "insegnante" a "a.olivi" se esiste tra gli insegnanti
+    const insegnanteResult = await pool.query(
+      `SELECT id FROM insegnanti WHERE nome = 'Alessandro' AND cognome = 'Olivi'`
+    );
+
+    if (insegnanteResult.rows.length > 0) {
+      await pool.query(
+        `INSERT INTO utenti (username, password, ruolo)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (username) DO UPDATE SET ruolo = EXCLUDED.ruolo`,
+        ['a.olivi', hashedSegreteria, 'insegnante'] // usa 'amamusic' anche per lui
+      );
+    }
+
+    res.json({ message: 'Setup utenti completato con admin e insegnante' });
+  } catch (err) {
+    console.error('Errore nel setup utenti:', err);
+    res.status(500).json({ message: 'Errore nel setup utenti' });
+  }
+});
+
+
 
 //////////////////////////
 // AVVIO SERVER
