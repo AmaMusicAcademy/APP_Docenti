@@ -365,57 +365,50 @@ app.get('/api/insegnanti/:id/lezioni', authenticateToken, async (req, res) => {
   }
 });
 
-app.get('/api/setup-utenti', async (req, res) => {
+//////////////////////////
+// AREA UTENTI
+//////////////////////////
+
+app.get('/api/utenti', authenticateToken, async (req, res) => {
+  if (req.user.ruolo !== 'admin') {
+    return res.status(403).json({ message: 'Accesso negato' });
+  }
+
   try {
-    // Crea tabella utenti se non esiste
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS utenti (
-        id SERIAL PRIMARY KEY,
-        username VARCHAR(50) UNIQUE NOT NULL,
-        password TEXT NOT NULL,
-        ruolo VARCHAR(20) CHECK (ruolo IN ('admin', 'insegnante')) NOT NULL
-      );
-    `);
-
-    // Inserisci admin "admin"
-    const hashedAdminPassword = await bcrypt.hash('admin', 10);
-    await pool.query(
-      `INSERT INTO utenti (username, password, ruolo)
-       VALUES ($1, $2, $3)
-       ON CONFLICT (username) DO NOTHING`,
-      ['admin', hashedAdminPassword, 'admin']
-    );
-
-    // Inserisci admin "segreteria"
-    const hashedSegreteria = await bcrypt.hash('amamusic', 10);
-    await pool.query(
-      `INSERT INTO utenti (username, password, ruolo)
-       VALUES ($1, $2, $3)
-       ON CONFLICT (username) DO NOTHING`,
-      ['segreteria', hashedSegreteria, 'admin']
-    );
-
-    // Assegna ruolo "insegnante" a "a.olivi" se esiste tra gli insegnanti
-    const insegnanteResult = await pool.query(
-      `SELECT id FROM insegnanti WHERE nome = 'Alessandro' AND cognome = 'Olivi'`
-    );
-
-    if (insegnanteResult.rows.length > 0) {
-      await pool.query(
-        `INSERT INTO utenti (username, password, ruolo)
-         VALUES ($1, $2, $3)
-         ON CONFLICT (username) DO UPDATE SET ruolo = EXCLUDED.ruolo`,
-        ['a.olivi', hashedSegreteria, 'insegnante'] // usa 'amamusic' anche per lui
-      );
-    }
-
-    res.json({ message: 'Setup utenti completato con admin e insegnante' });
+    const result = await pool.query('SELECT id, username, ruolo FROM utenti ORDER BY username');
+    res.json(result.rows);
   } catch (err) {
-    console.error('Errore nel setup utenti:', err);
-    res.status(500).json({ message: 'Errore nel setup utenti' });
+    console.error('Errore nel recupero utenti:', err);
+    res.status(500).json({ message: 'Errore server' });
   }
 });
 
+app.post('/api/utenti', authenticateToken, async (req, res) => {
+  if (req.user.ruolo !== 'admin') {
+    return res.status(403).json({ message: 'Accesso negato' });
+  }
+
+  const { username, password, ruolo } = req.body;
+
+  if (!username || !password || !['admin', 'insegnante'].includes(ruolo)) {
+    return res.status(400).json({ message: 'Dati non validi' });
+  }
+
+  try {
+    const hashedPassword = await bcrypt.hash(password, 10);
+    await pool.query(
+      `INSERT INTO utenti (username, password, ruolo)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (username) DO NOTHING`,
+      [username, hashedPassword, ruolo]
+    );
+
+    res.json({ message: 'Utente creato con successo' });
+  } catch (err) {
+    console.error('Errore nella creazione utente:', err);
+    res.status(500).json({ message: 'Errore server' });
+  }
+});
 
 
 //////////////////////////
