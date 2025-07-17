@@ -464,6 +464,25 @@ app.get('/api/setup-utenti', async (req, res) => {
 });
 
 
+app.get('/api/forza-admin', async (req, res) => {
+  try {
+    const hashed = await bcrypt.hash('amamusic', 10);
+
+    await pool.query(
+      `INSERT INTO utenti (username, password, ruolo)
+       VALUES ('segreteria', $1, 'admin')
+       ON CONFLICT (username) DO UPDATE SET password = EXCLUDED.password, ruolo = EXCLUDED.ruolo`,
+      [hashed]
+    );
+
+    res.json({ message: 'Utente "segreteria" aggiornato con successo' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: 'Errore nel reinserimento admin' });
+  }
+});
+
+
 //////////////////////////
 // AVVIO SERVER
 //////////////////////////
