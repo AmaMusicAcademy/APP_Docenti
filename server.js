@@ -89,31 +89,32 @@ app.post('/api/login', async (req, res) => {
   const { username, password } = req.body;
 
   try {
-    const result = await pool.query('SELECT * FROM insegnanti WHERE username = $1', [username]);
-    if (result.rows.length === 0) return res.status(401).json({ message: 'Credenziali non valide' });
+    // 🔍 Cerca prima negli utenti (admin o insegnanti con login)
+    const result = await pool.query('SELECT * FROM utenti WHERE username = $1', [username]);
 
-    const insegnante = result.rows[0];
-    const match = await bcrypt.compare(password, insegnante.password_hash);
+    if (result.rows.length === 0) {
+      return res.status(401).json({ message: 'Credenziali non valide' });
+    }
+
+    const user = result.rows[0];
+    const match = await bcrypt.compare(password, user.password);
+
     if (!match) return res.status(401).json({ message: 'Credenziali non valide' });
 
-    const token = jwt.sign({ id: insegnante.id, ruolo: 'insegnante' }, JWT_SECRET, { expiresIn: '2h' });
+    const token = jwt.sign({ id: user.id, username: user.username, ruolo: user.ruolo }, JWT_SECRET, { expiresIn: '12h' });
 
     res.json({
+      message: 'Login riuscito',
       token,
-      utente: {
-        id: insegnante.id,
-        nome: insegnante.nome,
-        cognome: insegnante.cognome,
-        username: insegnante.username,
-        ruolo: 'insegnante',
-        avatar_url: insegnante.avatar_url || null
-      }
+      ruolo: user.ruolo,
+      username: user.username
     });
   } catch (err) {
     console.error('Errore login:', err);
     res.status(500).json({ message: 'Errore server' });
   }
 });
+
 
 //////////////////////////
 // CAMBIO password
