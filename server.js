@@ -741,6 +741,25 @@ app.delete('/api/allievi/:id/pagamenti', async (req, res) => {
   }
 });
 
+
+app.get('/api/init-relazioni', async (req, res) => {
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS allievi_insegnanti (
+        allievo_id INTEGER REFERENCES allievi(id) ON DELETE CASCADE,
+        insegnante_id INTEGER REFERENCES insegnanti(id) ON DELETE CASCADE,
+        PRIMARY KEY (allievo_id, insegnante_id)
+      );
+    `);
+    res.json({ message: '✅ Tabella allievi_insegnanti creata (o già esistente)' });
+  } catch (err) {
+    console.error('Errore creazione tabella allievi_insegnanti:', err);
+    res.status(500).json({ error: 'Errore nella creazione tabella relazioni' });
+  }
+});
+
+
+
 //////////////////////////
 // AVVIO SERVER
 //////////////////////////
