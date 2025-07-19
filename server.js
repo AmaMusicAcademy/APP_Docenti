@@ -483,6 +483,59 @@ app.get('/api/forza-admin', async (req, res) => {
   }
 });
 
+//////////////////////////
+// ALLIEVI
+//////////////////////////
+
+// ✅ GET lista allievi con stato pagamenti
+app.get('/api/allievi', authenticateToken, async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT 
+        a.id, a.nome, a.cognome,
+        CASE 
+          WHEN COUNT(p.id) FILTER (WHERE EXTRACT(MONTH FROM p.data) = EXTRACT(MONTH FROM CURRENT_DATE) 
+                                    AND EXTRACT(YEAR FROM p.data) = EXTRACT(YEAR FROM CURRENT_DATE)) > 0 
+          THEN true ELSE false 
+        END AS in_regola
+      FROM allievi a
+      LEFT JOIN pagamenti p ON p.id_allievo = a.id
+      GROUP BY a.id
+      ORDER BY a.cognome, a.nome
+    `);
+
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Errore nel recupero allievi:', err);
+    res.status(500).json({ error: 'Errore server nel recupero allievi' });
+  }
+});
+
+//creare nuovo allievo
+app.post('/api/allievi', authenticateToken, async (req, res) => {
+  if (req.user.ruolo !== 'admin') {
+    return res.status(403).json({ message: 'Accesso negato' });
+  }
+
+  const { nome, cognome } = req.body;
+
+  if (!nome || !cognome) {
+    return res.status(400).json({ message: 'Nome e cognome sono obbligatori' });
+  }
+
+  try {
+    const result = await pool.query(
+      'INSERT INTO allievi (nome, cognome) VALUES ($1, $2) RETURNING *',
+      [nome.trim(), cognome.trim()]
+    );
+
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    console.error('Errore nella creazione allievo:', err);
+    res.status(500).json({ message: 'Errore nel salvataggio allievo' });
+  }
+});
+
 
 //////////////////////////
 // AVVIO SERVER
