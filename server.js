@@ -487,54 +487,150 @@ app.get('/api/forza-admin', async (req, res) => {
 // ALLIEVI
 //////////////////////////
 
-// ✅ GET lista allievi con stato pagamenti
+// GET tutti gli allievi
 app.get('/api/allievi', authenticateToken, async (req, res) => {
-  try {
-    const result = await pool.query(`
-      SELECT 
-        a.id, a.nome, a.cognome,
-        CASE 
-          WHEN COUNT(p.id) FILTER (WHERE EXTRACT(MONTH FROM p.data) = EXTRACT(MONTH FROM CURRENT_DATE) 
-                                    AND EXTRACT(YEAR FROM p.data) = EXTRACT(YEAR FROM CURRENT_DATE)) > 0 
-          THEN true ELSE false 
-        END AS in_regola
-      FROM allievi a
-      LEFT JOIN pagamenti p ON p.id_allievo = a.id
-      GROUP BY a.id
-      ORDER BY a.cognome, a.nome
-    `);
+  if (req.user.ruolo !== 'admin' && req.user.ruolo !== 'insegnante') {
+    return res.status(403).json({ message: 'Accesso negato' });
+  }
 
-    res.json(result.rows);
+  try {
+    const { rows } = await pool.query('SELECT * FROM allievi ORDER BY cognome, nome');
+    res.json(rows);
   } catch (err) {
     console.error('Errore nel recupero allievi:', err);
-    res.status(500).json({ error: 'Errore server nel recupero allievi' });
+    res.status(500).json({ error: 'Errore nel recupero allievi' });
   }
 });
 
-//creare nuovo allievo
+
+// GET un allievo per ID
+app.get('/api/allievi/:id', authenticateToken, async (req, res) => {
+  const { id } = req.params;
+
+  if (req.user.ruolo !== 'admin' && req.user.ruolo !== 'insegnante') {
+    return res.status(403).json({ message: 'Accesso negato' });
+  }
+
+  try {
+    const { rows } = await pool.query('SELECT * FROM allievi WHERE id = $1', [id]);
+    if (rows.length === 0) return res.status(404).json({ error: 'Allievo non trovato' });
+    res.json(rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: 'Errore nel recupero allievo' });
+  }
+});
+
+
+// POST nuovo allievo
 app.post('/api/allievi', authenticateToken, async (req, res) => {
   if (req.user.ruolo !== 'admin') {
     return res.status(403).json({ message: 'Accesso negato' });
   }
 
-  const { nome, cognome } = req.body;
-
-  if (!nome || !cognome) {
-    return res.status(400).json({ message: 'Nome e cognome sono obbligatori' });
-  }
+  const {
+    nome,
+    cognome,
+    email = '',
+    telefono = '',
+    note = '',
+    data_iscrizione = new Date().toISOString().split('T')[0],
+    quota_mensile = 0
+  } = req.body;
 
   try {
-    const result = await pool.query(
-      'INSERT INTO allievi (nome, cognome) VALUES ($1, $2) RETURNING *',
-      [nome.trim(), cognome.trim()]
+    const { rows } = await pool.query(
+      `INSERT INTO allievi (
+        nome, cognome, email, telefono, note, data_iscrizione, quota_mensile
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
+      [nome, cognome, email, telefono, note, data_iscrizione, quota_mensile]
     );
-
-    res.status(201).json(result.rows[0]);
+    res.status(201).json(rows[0]);
   } catch (err) {
     console.error('Errore nella creazione allievo:', err);
-    res.status(500).json({ message: 'Errore nel salvataggio allievo' });
+    res.status(500).json({ error: 'Errore nella creazione allievo' });
   }
 });
+
+
+// PUT modifica allievo
+app.put('/api/allievi/:id', authenticateToken, async (req, res) => {
+  if (req.user.ruolo !== 'admin') {
+    return res.status(403).json({ message: 'Accesso negato' });
+  }
+
+  const { id } = req.params;
+  const {
+    nome,
+    cognome,
+    email = '',
+    telefono = '',
+    note = '',
+    quota_mensile = 0
+  } = req.body;
+
+  try {
+    const { rows } = await pool.query(
+      `UPDATE allievi SET
+        nome = $1,
+        cognome = $2,
+        email = $3,
+        telefono = $4,
+        note = $5,
+        quota_mensile = $6
+       WHERE id = $7 RETURNING *`,
+      [nome, cognome, email, telefono, note, quota_mensile, id]
+    );
+
+    if (rows.length === 0) return res.status(404).json({ error: 'Allievo non trovato' });
+    res.json(rows[0]);
+  } catch (err) {
+    console.error('Errore nell\'aggiornamento allievo:', err);
+    res.status(500).json({ error: 'Errore nell\'aggiornamento allievo' });
+  }
+});
+
+
+// DELETE allievo
+app.delete('/api/allievi/:id', authenticateToken, async (req, res) => {
+  if (req.user.ruolo !== 'admin') {
+    return res.status(403).json({ message: 'Accesso negato' });
+  }
+
+  const { id } = req.params;
+  try {
+    const { rowCount } = await pool.query('DELETE FROM allievi WHERE id = $1', [id]);
+    if (rowCount === 0) return res.status(404).json({ error: 'Allievo non trovato' });
+    res.json({ message: 'Allievo eliminato' });
+  } catch (err) {
+    console.error('Errore nella cancellazione allievo:', err);
+    res.status(500).json({ error: 'Errore nella cancellazione allievo' });
+  }
+});
+
+
+// PATCH stato attivo/inattivo
+app.patch('/api/allievi/:id/stato', authenticateToken, async (req, res) => {
+  if (req.user.ruolo !== 'admin') {
+    return res.status(403).json({ message: 'Accesso negato' });
+  }
+
+  const { id } = req.params;
+  const { attivo } = req.body;
+
+  try {
+    const { rowCount } = await pool.query(
+      'UPDATE allievi SET attivo = $1 WHERE id = $2',
+      [attivo, id]
+    );
+
+    if (rowCount === 0) return res.status(404).json({ error: 'Allievo non trovato' });
+    res.status(204).send();
+  } catch (err) {
+    console.error('Errore nell\'aggiornamento stato allievo:', err);
+    res.status(500).json({ error: 'Errore nell\'aggiornamento stato allievo' });
+  }
+});
+
 
 
 //////////////////////////
