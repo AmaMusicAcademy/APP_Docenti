@@ -178,6 +178,32 @@ app.get('/api/insegnanti', async (req, res) => {
   }
 });
 
+app.post('/api/allievi/:id/insegnanti', async (req, res) => {
+  const { id } = req.params;
+  const { insegnanti } = req.body;
+
+  if (!Array.isArray(insegnanti)) {
+    return res.status(400).json({ error: 'Formato non valido' });
+  }
+
+  try {
+    await pool.query('DELETE FROM allievi_insegnanti WHERE allievo_id = $1', [id]);
+
+    const insertPromises = insegnanti.map((insegnanteId) =>
+      pool.query(
+        'INSERT INTO allievi_insegnanti (allievo_id, insegnante_id) VALUES ($1, $2)',
+        [id, insegnanteId]
+      )
+    );
+
+    await Promise.all(insertPromises);
+
+    res.json({ message: 'Assegnazioni salvate con successo' });
+  } catch (err) {
+    console.error('Errore nel salvataggio assegnazioni:', err);
+    res.status(500).json({ error: 'Errore nel salvataggio assegnazioni' });
+  }
+});
 
 
 //////////////////////////
