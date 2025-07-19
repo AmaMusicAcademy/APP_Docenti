@@ -205,6 +205,25 @@ app.post('/api/allievi/:id/insegnanti', async (req, res) => {
   }
 });
 
+app.get('/api/allievi/:id/insegnanti', async (req, res) => {
+  const { id } = req.params;
+
+  try {
+    const { rows } = await pool.query(`
+      SELECT i.id, i.nome, i.cognome
+      FROM insegnanti i
+      JOIN allievi_insegnanti ai ON i.id = ai.insegnante_id
+      WHERE ai.allievo_id = $1
+    `, [id]);
+
+    res.json(rows); // restituisce un array di insegnanti già assegnati
+  } catch (err) {
+    console.error('Errore nel recupero assegnazioni:', err);
+    res.status(500).json({ error: 'Errore nel recupero assegnazioni' });
+  }
+});
+
+
 
 //////////////////////////
 // PROTEZIONE PROFILO INSEGNANTE
