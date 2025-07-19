@@ -167,6 +167,19 @@ app.post('/api/insegnanti', async (req, res) => {
   }
 });
 
+// GET tutti gli insegnanti
+app.get('/api/insegnanti', async (req, res) => {
+  try {
+    const { rows } = await pool.query('SELECT * FROM insegnanti');
+    res.json(rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Errore nel recupero insegnanti' });
+  }
+});
+
+
+
 //////////////////////////
 // PROTEZIONE PROFILO INSEGNANTE
 //////////////////////////
