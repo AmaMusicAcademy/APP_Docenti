@@ -424,6 +424,25 @@ app.get('/api/insegnanti/:id/lezioni', authenticateToken, async (req, res) => {
   }
 });
 
+app.get('/api/insegnanti/:id/allievi', async (req, res) => {
+  const { id } = req.params;
+
+  try {
+    const { rows } = await pool.query(`
+      SELECT a.id, a.nome, a.cognome
+      FROM allievi a
+      JOIN allievi_insegnanti ai ON a.id = ai.allievo_id
+      WHERE ai.insegnante_id = $1
+    `, [id]);
+
+    res.json(rows); // restituisce un array di allievi assegnati
+  } catch (err) {
+    console.error('Errore nel recupero allievi assegnati:', err);
+    res.status(500).json({ error: 'Errore nel recupero allievi assegnati' });
+  }
+});
+
+
 //////////////////////////
 // AREA UTENTI
 //////////////////////////
