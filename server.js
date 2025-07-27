@@ -155,9 +155,18 @@ app.post('/api/insegnanti', async (req, res) => {
     const password = 'amamusic';
     const password_hash = await bcrypt.hash(password, 10);
 
+    // Inserisci nella tabella "insegnanti"
     const { rows } = await pool.query(
       'INSERT INTO insegnanti (nome, cognome, username, password_hash) VALUES ($1, $2, $3, $4) RETURNING *',
       [nome, cognome, username, password_hash]
+    );
+
+    // Inserisci anche nella tabella "utenti"
+    await pool.query(
+      `INSERT INTO utenti (username, password, ruolo)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (username) DO NOTHING`,
+      [username, password_hash, 'insegnante']
     );
 
     res.status(201).json({ ...rows[0], password_iniziale: password });
@@ -166,6 +175,7 @@ app.post('/api/insegnanti', async (req, res) => {
     res.status(500).json({ error: 'Errore nella creazione insegnante' });
   }
 });
+
 
 // GET tutti gli insegnanti
 app.get('/api/insegnanti', async (req, res) => {
@@ -854,6 +864,15 @@ app.get('/api/init-relazioni', async (req, res) => {
   }
 });
 
+app.get('/api/debug-utenti', async (req, res) => {
+  try {
+    const result = await pool.query('SELECT * FROM utenti');
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Errore nel debug utenti:', err);
+    res.status(500).json({ error: 'Errore nel debug' });
+  }
+});
 
 
 //////////////////////////
