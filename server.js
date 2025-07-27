@@ -402,6 +402,64 @@ app.get('/api/insegnanti/:id/compenso', async (req, res) => {
   }
 });
 
+// ✅ GET tutte le lezioni con info insegnante e allievo
+
+app.get('/api/lezioni', async (req, res) => {
+  try {
+    const { rows } = await pool.query(`
+      SELECT 
+        lezioni.id,
+        lezioni.data,
+        lezioni.ora_inizio,
+        lezioni.ora_fine,
+        lezioni.aula,
+        lezioni.stato,
+        lezioni.motivazione,
+        lezioni.riprogrammata, -- ✅ aggiunto
+        lezioni.id_insegnante,
+        lezioni.id_allievo,
+        i.nome AS nome_insegnante,
+        i.cognome AS cognome_insegnante,
+        a.nome AS nome_allievo,
+        a.cognome AS cognome_allievo
+      FROM lezioni
+      LEFT JOIN insegnanti i ON lezioni.id_insegnante = i.id
+      LEFT JOIN allievi a ON lezioni.id_allievo = a.id
+    `);
+
+    const eventi = rows
+      .filter(lezione => lezione.data && lezione.ora_inizio && lezione.ora_fine)
+      .map(lezione => {
+        const dataSolo = new Date(lezione.data).toISOString().split('T')[0];
+        const start = `${dataSolo}T${lezione.ora_inizio}`;
+        const end = `${dataSolo}T${lezione.ora_fine}`;
+
+return {
+  id: lezione.id,
+  id_insegnante: lezione.id_insegnante,
+  id_allievo: lezione.id_allievo,
+  nome_allievo: lezione.nome_allievo,
+  cognome_allievo: lezione.cognome_allievo,
+  aula: lezione.aula,
+  stato: lezione.stato,
+  motivazione: lezione.motivazione,
+  riprogrammata: lezione.riprogrammata,
+  title: `Lezione con ${lezione.nome_allievo || 'Allievo'} - Aula ${lezione.aula}`,
+  start,
+  end,
+  data: lezione.data, // 👈 AGGIUNTO
+  ora_inizio: lezione.ora_inizio, // 👈 AGGIUNTO
+  ora_fine: lezione.ora_fine // 👈 AGGIUNTO
+};
+      });
+
+    res.json(eventi);
+  } catch (err) {
+    console.error('Errore nel recupero lezioni:', err);
+    res.status(500).json({ error: 'Errore nel recupero lezioni' });
+  }
+});
+
 app.get('/api/insegnanti/:id/lezioni', authenticateToken, async (req, res) => {
   const { id } = req.params;
 
