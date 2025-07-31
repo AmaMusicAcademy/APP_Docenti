@@ -628,6 +628,20 @@ app.get('/api/forza-admin', async (req, res) => {
   }
 });
 
+app.get('/api/insegnante/me', authenticateToken, async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      'SELECT id, nome, cognome, username, avatar_url FROM insegnanti WHERE id = $1',
+      [req.user.id]
+    );
+    if (rows.length === 0) return res.status(404).json({ message: 'Utente non trovato' });
+    res.json(rows[0]);
+  } catch (err) {
+    console.error('Errore caricamento dati utente:', err);
+    res.status(500).json({ message: 'Errore server' });
+  }
+});
+
 //////////////////////////
 // ALLIEVI
 //////////////////////////
