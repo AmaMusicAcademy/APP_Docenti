@@ -479,7 +479,7 @@ app.post('/api/lezioni', authenticateToken, async (req, res) => {
       ora_inizio,    // "HH:MM" o "HH:MM:SS"
       ora_fine,      // "
       aula,
-      stato = 'programmata',
+      stato = 'svolta',
       motivazione = null
     } = req.body;
 
