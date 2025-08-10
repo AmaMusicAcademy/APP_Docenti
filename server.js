@@ -470,6 +470,64 @@ return {
   }
 });
 
+app.post('/api/lezioni', authenticateToken, async (req, res) => {
+  try {
+    const {
+      id_insegnante,
+      id_allievo,
+      data,          // "YYYY-MM-DD"
+      ora_inizio,    // "HH:MM" o "HH:MM:SS"
+      ora_fine,      // "
+      aula,
+      stato = 'programmata',
+      motivazione = null
+    } = req.body;
+
+    if (!id_insegnante || !id_allievo || !data || !ora_inizio || !ora_fine || !aula) {
+      return res.status(400).json({ error: 'Dati incompleti per creare la lezione' });
+    }
+
+    // Autorizzazione: admin può tutto; insegnante solo su se stesso
+    if (req.user.ruolo !== 'admin' && String(req.user.id) !== String(id_insegnante)) {
+      return res.status(403).json({ error: 'Accesso non autorizzato' });
+    }
+
+    // (facoltativo) verifica sovrapposizioni della stessa aula o stesso insegnante, ecc.
+
+    const insert = await pool.query(
+      `
+      INSERT INTO lezioni (
+        id_insegnante, id_allievo, data, ora_inizio, ora_fine, aula, stato, motivazione, riprogrammata
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,false)
+      RETURNING *
+      `,
+      [id_insegnante, id_allievo, data, ora_inizio, ora_fine, aula, stato, motivazione]
+    );
+
+    const row = insert.rows[0];
+
+    // (facoltativo) arricchisci con nome allievo
+    const dett = await pool.query(
+      `SELECT a.nome AS nome_allievo, a.cognome AS cognome_allievo
+       FROM allievi a WHERE a.id = $1`, [row.id_allievo]
+    );
+    const allievo = dett.rows[0] || {};
+
+    const dataSolo = String(row.data).slice(0,10);
+    res.status(201).json({
+      ...row,
+      nome_allievo: allievo.nome_allievo,
+      cognome_allievo: allievo.cognome_allievo,
+      start: `${dataSolo}T${row.ora_inizio}`,
+      end: `${dataSolo}T${row.ora_fine}`,
+    });
+  } catch (err) {
+    console.error('Errore creazione lezione:', err);
+    res.status(500).json({ error: 'Errore nella creazione lezione' });
+  }
+});
+
+
 app.get('/api/insegnanti/:id/lezioni', authenticateToken, async (req, res) => {
   const { id } = req.params;
 
