@@ -414,53 +414,78 @@ app.get('/api/insegnanti/:id/compenso', async (req, res) => {
 
 // ✅ GET tutte le lezioni con info insegnante e allievo
 
+// ✅ GET tutte le lezioni con info insegnante e allievo
 app.get('/api/lezioni', async (req, res) => {
   try {
     const { rows } = await pool.query(`
       SELECT 
-        lezioni.id,
-        lezioni.data,
-        lezioni.ora_inizio,
-        lezioni.ora_fine,
-        lezioni.aula,
-        lezioni.stato,
-        lezioni.motivazione,
-        lezioni.riprogrammata, -- ✅ aggiunto
-        lezioni.id_insegnante,
-        lezioni.id_allievo,
-        i.nome AS nome_insegnante,
+        l.id,
+        l.data,
+        l.ora_inizio,
+        l.ora_fine,
+        l.aula,
+        l.stato,
+        l.motivazione,
+        l.riprogrammata,
+        l.storico_programmazioni,  -- 👈 include lo storico (JSONB)
+        l.id_insegnante,
+        l.id_allievo,
+        i.nome   AS nome_insegnante,
         i.cognome AS cognome_insegnante,
-        a.nome AS nome_allievo,
+        a.nome   AS nome_allievo,
         a.cognome AS cognome_allievo
-      FROM lezioni
-      LEFT JOIN insegnanti i ON lezioni.id_insegnante = i.id
-      LEFT JOIN allievi a ON lezioni.id_allievo = a.id
+      FROM lezioni l
+      LEFT JOIN insegnanti i ON l.id_insegnante = i.id
+      LEFT JOIN allievi a     ON l.id_allievo     = a.id
     `);
 
-    const eventi = rows
+    // Helpers per sicurezza formati
+    const dateOnly = (d) => {
+      if (!d) return null;
+      if (typeof d === 'string') return d.slice(0, 10);
+      try {
+        return new Date(d).toISOString().slice(0, 10);
+      } catch {
+        return String(d).slice(0, 10);
+      }
+    };
+    const hhmm = (t) => (t ? String(t).slice(0, 5) : null);
+
+    const eventi = (rows || [])
       .filter(lezione => lezione.data && lezione.ora_inizio && lezione.ora_fine)
       .map(lezione => {
-        const dataSolo = new Date(lezione.data).toISOString().split('T')[0];
-        const start = `${dataSolo}T${lezione.ora_inizio}`;
-        const end = `${dataSolo}T${lezione.ora_fine}`;
+        const ymd = dateOnly(lezione.data);
+        const oi  = hhmm(lezione.ora_inizio);
+        const of  = hhmm(lezione.ora_fine);
 
-return {
-  id: lezione.id,
-  id_insegnante: lezione.id_insegnante,
-  id_allievo: lezione.id_allievo,
-  nome_allievo: lezione.nome_allievo,
-  cognome_allievo: lezione.cognome_allievo,
-  aula: lezione.aula,
-  stato: lezione.stato,
-  motivazione: lezione.motivazione,
-  riprogrammata: lezione.riprogrammata,
-  title: `Lezione con ${lezione.nome_allievo || 'Allievo'} - Aula ${lezione.aula}`,
-  start,
-  end,
-  data: lezione.data, // 👈 AGGIUNTO
-  ora_inizio: lezione.ora_inizio, // 👈 AGGIUNTO
-  ora_fine: lezione.ora_fine // 👈 AGGIUNTO
-};
+        return {
+          id: lezione.id,
+          id_insegnante: lezione.id_insegnante,
+          id_allievo: lezione.id_allievo,
+
+          nome_insegnante: lezione.nome_insegnante,
+          cognome_insegnante: lezione.cognome_insegnante,
+          nome_allievo: lezione.nome_allievo,
+          cognome_allievo: lezione.cognome_allievo,
+
+          aula: lezione.aula,
+          stato: lezione.stato,                  // es. "svolta" | "rimandata" | "annullata"
+          motivazione: lezione.motivazione,
+          riprogrammata: lezione.riprogrammata,  // 👈 boolean
+          storico_programmazioni: Array.isArray(lezione.storico_programmazioni)
+            ? lezione.storico_programmazioni
+            : (lezione.storico_programmazioni || []), // 👈 array di {data,ora_inizio,ora_fine,aula,recorded_at}
+
+          // campi "view" per FullCalendar
+          title: `Lezione con ${lezione.nome_allievo || 'Allievo'}${lezione.aula ? ` - Aula ${lezione.aula}` : ''}`,
+          start: ymd && oi ? `${ymd}T${oi}` : null,
+          end:   ymd && of ? `${ymd}T${of}` : null,
+
+          // campi "raw" utili al frontend
+          data: ymd,
+          ora_inizio: oi,
+          ora_fine: of
+        };
       });
 
     res.json(eventi);
@@ -469,6 +494,7 @@ return {
     res.status(500).json({ error: 'Errore nel recupero lezioni' });
   }
 });
+
 
 app.post('/api/lezioni', authenticateToken, async (req, res) => {
   try {
@@ -557,7 +583,12 @@ app.put('/api/lezioni/:id', async (req, res) => {
   } = req.body;
 
   try {
-    // ✅ Controlla conflitto solo se aula e orari sono definiti
+    // 1) recupera lo stato attuale
+    const curQ = await pool.query('SELECT * FROM lezioni WHERE id = $1', [id]);
+    if (curQ.rows.length === 0) return res.status(404).json({ error: 'Lezione non trovata' });
+    const cur = curQ.rows[0];
+
+    // 2) conflitti (se cambi data/aula/orari)
     if (data && ora_inizio && ora_fine && aula) {
       const conflictQuery = `
         SELECT 1 FROM lezioni
@@ -569,7 +600,6 @@ app.put('/api/lezioni/:id', async (req, res) => {
       `;
       const conflictValues = [id, data, aula, ora_inizio, ora_fine];
       const conflictResult = await pool.query(conflictQuery, conflictValues);
-
       if (conflictResult.rows.length > 0) {
         return res.status(400).json({
           error: 'L\'aula selezionata è già occupata nella data/ora indicata.',
@@ -577,6 +607,26 @@ app.put('/api/lezioni/:id', async (req, res) => {
       }
     }
 
+    // 3) costruisci nuovo storico se l'orario cambia
+    const scheduleChanged =
+      (data   && String(data)      !== String(cur.data))       ||
+      (ora_inizio && String(ora_inizio) !== String(cur.ora_inizio)) ||
+      (ora_fine   && String(ora_fine)   !== String(cur.ora_fine))   ||
+      (aula       && String(aula)       !== String(cur.aula));
+
+    let storico = Array.isArray(cur.storico_programmazioni) ? cur.storico_programmazioni : [];
+    if (scheduleChanged) {
+      const prev = {
+        data: String(cur.data).slice(0, 10),
+        ora_inizio: cur.ora_inizio,
+        ora_fine: cur.ora_fine,
+        aula: cur.aula,
+        recorded_at: new Date().toISOString()
+      };
+      storico = [...storico, prev];
+    }
+
+    // 4) aggiorna
     const updateQuery = `
       UPDATE lezioni SET 
         id_insegnante = $1, 
@@ -587,35 +637,34 @@ app.put('/api/lezioni/:id', async (req, res) => {
         aula = $6, 
         stato = $7,
         motivazione = $8,
-        riprogrammata = $9
-      WHERE id = $10
+        riprogrammata = $9,
+        storico_programmazioni = $10
+      WHERE id = $11
       RETURNING *
     `;
     const updateValues = [
-      id_insegnante,
-      id_allievo,
-      data,
-      ora_inizio,
-      ora_fine,
-      aula,
-      stato,
-      motivazione,
-      riprogrammata,
+      id_insegnante ?? cur.id_insegnante,
+      id_allievo ?? cur.id_allievo,
+      data ?? cur.data,
+      ora_inizio ?? cur.ora_inizio,
+      ora_fine ?? cur.ora_fine,
+      aula ?? cur.aula,
+      stato ?? cur.stato,
+      motivazione ?? cur.motivazione,
+      // se ho cambiato orario, forzo riprogrammata=true (resta true anche se già true)
+      scheduleChanged ? true : (riprogrammata ?? cur.riprogrammata),
+      JSON.stringify(storico),
       id,
     ];
 
     const { rows } = await pool.query(updateQuery, updateValues);
-
-    if (rows.length === 0) {
-      return res.status(404).json({ error: 'Lezione non trovata' });
-    }
-
     res.json(rows[0]);
   } catch (err) {
     console.error('Errore nell\'aggiornamento lezione:', err);
     res.status(500).json({ error: 'Errore nell\'aggiornamento lezione' });
   }
 });
+
 
 
 
@@ -1052,6 +1101,21 @@ app.get('/api/debug-utenti', async (req, res) => {
     res.status(500).json({ error: 'Errore nel debug' });
   }
 });
+
+// ⬇️ aggiungi vicino agli altri endpoint di setup
+app.get('/api/setup-lezioni-history', async (req, res) => {
+  try {
+    await pool.query(`
+      ALTER TABLE lezioni
+      ADD COLUMN IF NOT EXISTS storico_programmazioni JSONB DEFAULT '[]'::jsonb
+    `);
+    res.json({ message: '✅ Colonna storico_programmazioni aggiunta (o già presente).' });
+  } catch (err) {
+    console.error('Errore setup storico_programmazioni:', err);
+    res.status(500).json({ error: 'Errore setup storico' });
+  }
+});
+
 
 
 //////////////////////////
