@@ -689,7 +689,67 @@ app.put('/api/lezioni/:id', authenticateToken, async (req, res) => {
   }
 });
 
+// ✅ PATCH: forza RIMANDA senza toccare data/ora/aula
+app.patch('/api/lezioni/:id/rimanda', authenticateToken, async (req, res) => {
+  const { id } = req.params;
+  const { motivazione = '' } = req.body;
 
+  try {
+    // leggi la lezione per autorizzazione
+    const curRes = await pool.query('SELECT * FROM lezioni WHERE id = $1', [id]);
+    if (curRes.rows.length === 0) return res.status(404).json({ error: 'Lezione non trovata' });
+    const cur = curRes.rows[0];
+
+    // admin ok; insegnante solo su se stesso
+    if (req.user.ruolo !== 'admin' && String(req.user.id) !== String(cur.id_insegnante)) {
+      return res.status(403).json({ error: 'Accesso non autorizzato' });
+    }
+
+    const update = await pool.query(`
+      UPDATE lezioni SET
+        stato = 'rimandata',
+        riprogrammata = false,
+        motivazione = $1
+      WHERE id = $2
+      RETURNING *
+    `, [motivazione, id]);
+
+    res.json(update.rows[0]);
+  } catch (err) {
+    console.error('PATCH rimanda errore:', err);
+    res.status(500).json({ error: 'Errore nel rimandare la lezione' });
+  }
+});
+
+// ✅ PATCH: forza ANNULLA senza toccare data/ora/aula
+app.patch('/api/lezioni/:id/annulla', authenticateToken, async (req, res) => {
+  const { id } = req.params;
+  const { motivazione = '' } = req.body;
+
+  try {
+    const curRes = await pool.query('SELECT * FROM lezioni WHERE id = $1', [id]);
+    if (curRes.rows.length === 0) return res.status(404).json({ error: 'Lezione non trovata' });
+    const cur = curRes.rows[0];
+
+    if (req.user.ruolo !== 'admin' && String(req.user.id) !== String(cur.id_insegnante)) {
+      return res.status(403).json({ error: 'Accesso non autorizzato' });
+    }
+
+    const update = await pool.query(`
+      UPDATE lezioni SET
+        stato = 'annullata',
+        riprogrammata = false,
+        motivazione = $1
+      WHERE id = $2
+      RETURNING *
+    `, [motivazione, id]);
+
+    res.json(update.rows[0]);
+  } catch (err) {
+    console.error('PATCH annulla errore:', err);
+    res.status(500).json({ error: "Errore nell'annullare la lezione" });
+  }
+});
 
 // DELETE lezione
 app.delete('/api/lezioni/:id', async (req, res) => {
