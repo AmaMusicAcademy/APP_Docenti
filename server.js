@@ -578,24 +578,33 @@ app.put('/api/lezioni/:id', authenticateToken, async (req, res) => {
     ora_fine,
     aula,
     stato,
-    motivazione = '',
-    riprogrammata // il client può inviarla ma la ricalcoliamo noi
+    motivazione = ''
   } = req.body;
+
+  const onlyHHMM = (t) => (t ? String(t).slice(0, 5) : "");
+  const onlyYMD  = (d) => (d ? String(d).slice(0, 10) : "");
+
+  // parser sicuro per JSON/JSONB
+  const parseHistory = (v) => {
+    if (Array.isArray(v)) return v;
+    if (typeof v === 'string') {
+      try { const p = JSON.parse(v); return Array.isArray(p) ? p : []; } catch { return []; }
+    }
+    return [];
+  };
 
   try {
     // 1) leggi lezione corrente
     const curRes = await pool.query('SELECT * FROM lezioni WHERE id = $1', [id]);
-    if (curRes.rows.length === 0) {
-      return res.status(404).json({ error: 'Lezione non trovata' });
-    }
+    if (curRes.rows.length === 0) return res.status(404).json({ error: 'Lezione non trovata' });
     const cur = curRes.rows[0];
 
-    // Autorizzazione: admin può tutto; insegnante solo su se stesso
+    // Autorizzazione: admin ok; insegnante solo su se stesso
     if (req.user.ruolo !== 'admin' && String(req.user.id) !== String(cur.id_insegnante)) {
       return res.status(403).json({ error: 'Accesso non autorizzato' });
     }
 
-    // 2) conflitti aula/orari (solo se tutti i campi necessari ci sono)
+    // 2) conflitti aula/orari se completi
     if (data && ora_inizio && ora_fine && aula) {
       const conflictQuery = `
         SELECT 1 FROM lezioni
@@ -608,47 +617,42 @@ app.put('/api/lezioni/:id', authenticateToken, async (req, res) => {
       const conflictValues = [id, data, aula, ora_inizio, ora_fine];
       const conflictResult = await pool.query(conflictQuery, conflictValues);
       if (conflictResult.rows.length > 0) {
-        return res.status(400).json({
-          error: "L'aula selezionata è già occupata nella data/ora indicata.",
-        });
+        return res.status(400).json({ error: "L'aula selezionata è già occupata nella data/ora indicata." });
       }
     }
 
-    // 3) rileva se la programmazione è cambiata
-    const scheduleChanged =
-      (data && String(data).slice(0,10) !== String(cur.data).slice(0,10)) ||
-      (ora_inizio && ora_inizio !== cur.ora_inizio) ||
-      (ora_fine && ora_fine !== cur.ora_fine) ||
-      (aula && aula !== cur.aula);
+    // 3) rileva cambi di programmazione NORMALIZZANDO
+    const dateChanged  = (data != null)      && (onlyYMD(data)      !== onlyYMD(cur.data));
+    const startChanged = (ora_inizio != null) && (onlyHHMM(ora_inizio) !== onlyHHMM(cur.ora_inizio));
+    const endChanged   = (ora_fine   != null) && (onlyHHMM(ora_fine)   !== onlyHHMM(cur.ora_fine));
+    const roomChanged  = (aula       != null) && (String(aula).trim()  !== String(cur.aula || '').trim());
+    const scheduleChanged = dateChanged || startChanged || endChanged || roomChanged;
 
-    // 4) calcola riprogrammata e old_schedules
+    // 4) calcola riprogrammata + history
     let newRiprogrammata = false;
-    let newOld = Array.isArray(cur.old_schedules) ? cur.old_schedules : [];
+    let newOld = parseHistory(cur.old_schedules);
 
-    if (stato === 'rimandata') {
+    if ((stato ?? cur.stato) === 'rimandata') {
       if (scheduleChanged) {
-        // diventa "riprogrammata": aggiungi vecchia programmazione alla storia
         newRiprogrammata = true;
         newOld = [
           ...newOld,
           {
-            data: String(cur.data).slice(0,10),
-            ora_inizio: cur.ora_inizio,
-            ora_fine: cur.ora_fine,
+            data: onlyYMD(cur.data),
+            ora_inizio: onlyHHMM(cur.ora_inizio),
+            ora_fine: onlyHHMM(cur.ora_fine),
             aula: cur.aula,
             changed_at: new Date().toISOString()
           }
         ];
       } else {
-        // rimandata ma non riprogrammata (nessun cambio data/ora/aula)
         newRiprogrammata = false;
       }
     } else {
-      // qualunque altro stato non è "riprogrammata"
       newRiprogrammata = false;
     }
 
-    // 5) esegui update
+    // 5) update
     const updateQuery = `
       UPDATE lezioni SET 
         id_insegnante = $1, 
@@ -678,16 +682,12 @@ app.put('/api/lezioni/:id', authenticateToken, async (req, res) => {
       id,
     ];
     const { rows } = await pool.query(updateQuery, updateValues);
-    const row = rows[0];
-
-    res.json(row);
+    res.json(rows[0]);
   } catch (err) {
     console.error("Errore nell'aggiornamento lezione:", err);
     res.status(500).json({ error: "Errore nell'aggiornamento lezione" });
   }
 });
-
-
 
 
 
