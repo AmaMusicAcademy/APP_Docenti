@@ -568,7 +568,7 @@ app.get('/api/lezioni/:id', async (req, res) => {
   }
 });
 
-app.put('/api/lezioni/:id', async (req, res) => {
+app.put('/api/lezioni/:id', authenticateToken, async (req, res) => {
   const { id } = req.params;
   const {
     id_insegnante,
@@ -579,16 +579,23 @@ app.put('/api/lezioni/:id', async (req, res) => {
     aula,
     stato,
     motivazione = '',
-    riprogrammata = false
+    riprogrammata // il client può inviarla ma la ricalcoliamo noi
   } = req.body;
 
   try {
-    // 1) recupera lo stato attuale
-    const curQ = await pool.query('SELECT * FROM lezioni WHERE id = $1', [id]);
-    if (curQ.rows.length === 0) return res.status(404).json({ error: 'Lezione non trovata' });
-    const cur = curQ.rows[0];
+    // 1) leggi lezione corrente
+    const curRes = await pool.query('SELECT * FROM lezioni WHERE id = $1', [id]);
+    if (curRes.rows.length === 0) {
+      return res.status(404).json({ error: 'Lezione non trovata' });
+    }
+    const cur = curRes.rows[0];
 
-    // 2) conflitti (se cambi data/aula/orari)
+    // Autorizzazione: admin può tutto; insegnante solo su se stesso
+    if (req.user.ruolo !== 'admin' && String(req.user.id) !== String(cur.id_insegnante)) {
+      return res.status(403).json({ error: 'Accesso non autorizzato' });
+    }
+
+    // 2) conflitti aula/orari (solo se tutti i campi necessari ci sono)
     if (data && ora_inizio && ora_fine && aula) {
       const conflictQuery = `
         SELECT 1 FROM lezioni
@@ -602,31 +609,46 @@ app.put('/api/lezioni/:id', async (req, res) => {
       const conflictResult = await pool.query(conflictQuery, conflictValues);
       if (conflictResult.rows.length > 0) {
         return res.status(400).json({
-          error: 'L\'aula selezionata è già occupata nella data/ora indicata.',
+          error: "L'aula selezionata è già occupata nella data/ora indicata.",
         });
       }
     }
 
-    // 3) costruisci nuovo storico se l'orario cambia
+    // 3) rileva se la programmazione è cambiata
     const scheduleChanged =
-      (data   && String(data)      !== String(cur.data))       ||
-      (ora_inizio && String(ora_inizio) !== String(cur.ora_inizio)) ||
-      (ora_fine   && String(ora_fine)   !== String(cur.ora_fine))   ||
-      (aula       && String(aula)       !== String(cur.aula));
+      (data && String(data).slice(0,10) !== String(cur.data).slice(0,10)) ||
+      (ora_inizio && ora_inizio !== cur.ora_inizio) ||
+      (ora_fine && ora_fine !== cur.ora_fine) ||
+      (aula && aula !== cur.aula);
 
-    let storico = Array.isArray(cur.storico_programmazioni) ? cur.storico_programmazioni : [];
-    if (scheduleChanged) {
-      const prev = {
-        data: String(cur.data).slice(0, 10),
-        ora_inizio: cur.ora_inizio,
-        ora_fine: cur.ora_fine,
-        aula: cur.aula,
-        recorded_at: new Date().toISOString()
-      };
-      storico = [...storico, prev];
+    // 4) calcola riprogrammata e old_schedules
+    let newRiprogrammata = false;
+    let newOld = Array.isArray(cur.old_schedules) ? cur.old_schedules : [];
+
+    if (stato === 'rimandata') {
+      if (scheduleChanged) {
+        // diventa "riprogrammata": aggiungi vecchia programmazione alla storia
+        newRiprogrammata = true;
+        newOld = [
+          ...newOld,
+          {
+            data: String(cur.data).slice(0,10),
+            ora_inizio: cur.ora_inizio,
+            ora_fine: cur.ora_fine,
+            aula: cur.aula,
+            changed_at: new Date().toISOString()
+          }
+        ];
+      } else {
+        // rimandata ma non riprogrammata (nessun cambio data/ora/aula)
+        newRiprogrammata = false;
+      }
+    } else {
+      // qualunque altro stato non è "riprogrammata"
+      newRiprogrammata = false;
     }
 
-    // 4) aggiorna
+    // 5) esegui update
     const updateQuery = `
       UPDATE lezioni SET 
         id_insegnante = $1, 
@@ -638,7 +660,7 @@ app.put('/api/lezioni/:id', async (req, res) => {
         stato = $7,
         motivazione = $8,
         riprogrammata = $9,
-        storico_programmazioni = $10
+        old_schedules = $10
       WHERE id = $11
       RETURNING *
     `;
@@ -650,18 +672,18 @@ app.put('/api/lezioni/:id', async (req, res) => {
       ora_fine ?? cur.ora_fine,
       aula ?? cur.aula,
       stato ?? cur.stato,
-      motivazione ?? cur.motivazione,
-      // se ho cambiato orario, forzo riprogrammata=true (resta true anche se già true)
-      scheduleChanged ? true : (riprogrammata ?? cur.riprogrammata),
-      JSON.stringify(storico),
+      motivazione,
+      newRiprogrammata,
+      JSON.stringify(newOld),
       id,
     ];
-
     const { rows } = await pool.query(updateQuery, updateValues);
-    res.json(rows[0]);
+    const row = rows[0];
+
+    res.json(row);
   } catch (err) {
-    console.error('Errore nell\'aggiornamento lezione:', err);
-    res.status(500).json({ error: 'Errore nell\'aggiornamento lezione' });
+    console.error("Errore nell'aggiornamento lezione:", err);
+    res.status(500).json({ error: "Errore nell'aggiornamento lezione" });
   }
 });
 
@@ -1113,6 +1135,16 @@ app.get('/api/setup-lezioni-history', async (req, res) => {
   } catch (err) {
     console.error('Errore setup storico_programmazioni:', err);
     res.status(500).json({ error: 'Errore setup storico' });
+  }
+});
+
+app.get('/api/init-lezioni-history1', async (_req, res) => {
+  try {
+    await pool.query(`ALTER TABLE lezioni ADD COLUMN IF NOT EXISTS old_schedules JSONB DEFAULT '[]'::jsonb`);
+    res.json({ ok: true });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ ok: false, error: 'alter table failed' });
   }
 });
 
