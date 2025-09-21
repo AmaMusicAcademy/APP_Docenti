@@ -1307,6 +1307,126 @@ app.delete('/api/allievi/:id/quota-associativa', authenticateToken, async (req, 
 });
 
 
+
+// ======================
+//      AULE (CRUD)
+// ======================
+
+// GET /api/aule  → lista aule
+app.get('/api/aule', authenticateToken, async (req, res) => {
+  if (req.user.ruolo !== 'admin') return res.status(403).json({ message: 'Accesso negato' });
+  try {
+    const { rows } = await pool.query('SELECT id, nome FROM aule ORDER BY nome ASC');
+    res.json(rows);
+  } catch (err) {
+    console.error('Errore GET aule:', err);
+    res.status(500).json({ error: 'Errore nel recupero aule' });
+  }
+});
+
+// POST /api/aule  → crea aula
+app.post('/api/aule', authenticateToken, async (req, res) => {
+  if (req.user.ruolo !== 'admin') return res.status(403).json({ message: 'Accesso negato' });
+
+  const { nome } = req.body;
+  if (!nome || !String(nome).trim()) {
+    return res.status(400).json({ error: 'Nome aula obbligatorio' });
+  }
+
+  try {
+    const { rows } = await pool.query(
+      `INSERT INTO aule (nome) VALUES ($1) RETURNING id, nome`,
+      [String(nome).trim()]
+    );
+    res.status(201).json(rows[0]);
+  } catch (err) {
+    if (String(err?.message || '').includes('duplicate')) {
+      return res.status(409).json({ error: 'Esiste già un’aula con questo nome' });
+    }
+    console.error('Errore POST aula:', err);
+    res.status(500).json({ error: 'Errore creazione aula' });
+  }
+});
+
+// PUT /api/aule/:id  → rinomina aula
+app.put('/api/aule/:id', authenticateToken, async (req, res) => {
+  if (req.user.ruolo !== 'admin') return res.status(403).json({ message: 'Accesso negato' });
+
+  const { id } = req.params;
+  const { nome } = req.body;
+
+  if (!nome || !String(nome).trim()) {
+    return res.status(400).json({ error: 'Nome aula obbligatorio' });
+  }
+
+  try {
+    const { rows } = await pool.query(
+      `UPDATE aule SET nome = $1 WHERE id = $2 RETURNING id, nome`,
+      [String(nome).trim(), id]
+    );
+    if (rows.length === 0) return res.status(404).json({ error: 'Aula non trovata' });
+
+    // ⚠️ Opzionale: se vuoi riflettere il cambio anche sulle lezioni esistenti:
+    // await pool.query(`UPDATE lezioni SET aula = $1 WHERE aula = $2`, [String(nome).trim(), oldNome]);
+
+    res.json(rows[0]);
+  } catch (err) {
+    if (String(err?.message || '').includes('duplicate')) {
+      return res.status(409).json({ error: 'Esiste già un’aula con questo nome' });
+    }
+    console.error('Errore PUT aula:', err);
+    res.status(500).json({ error: 'Errore aggiornamento aula' });
+  }
+});
+
+// DELETE /api/aule/:id  → elimina aula
+app.delete('/api/aule/:id', authenticateToken, async (req, res) => {
+  if (req.user.ruolo !== 'admin') return res.status(403).json({ message: 'Accesso negato' });
+
+  const { id } = req.params;
+  try {
+    // Se vuoi impedire l’eliminazione se esistono lezioni che usano quest’aula:
+    // const inUse = await pool.query(`SELECT 1 FROM lezioni WHERE aula = (SELECT nome FROM aule WHERE id=$1) LIMIT 1`, [id]);
+    // if (inUse.rows.length) return res.status(409).json({ error: 'Aula utilizzata in alcune lezioni: non eliminabile' });
+
+    const { rowCount } = await pool.query(`DELETE FROM aule WHERE id = $1`, [id]);
+    if (rowCount === 0) return res.status(404).json({ error: 'Aula non trovata' });
+    res.json({ message: 'Aula eliminata' });
+  } catch (err) {
+    console.error('Errore DELETE aula:', err);
+    res.status(500).json({ error: 'Errore cancellazione aula' });
+  }
+});
+
+
+// 🔧 Setup tabella AULE + import opzionale da lezioni
+app.get('/api/setup-aule', async (_req, res) => {
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS aule (
+        id SERIAL PRIMARY KEY,
+        nome TEXT UNIQUE NOT NULL
+      );
+    `);
+
+    // opzionale: importa le aule distinte già presenti nelle lezioni
+    await pool.query(`
+      INSERT INTO aule (nome)
+      SELECT DISTINCT TRIM(aula) AS nome
+      FROM lezioni
+      WHERE aula IS NOT NULL AND TRIM(aula) <> ''
+      ON CONFLICT (nome) DO NOTHING;
+    `);
+
+    res.json({ message: '✅ Tabella aule pronta (e popolata dai valori presenti in lezioni, se ce n’erano).' });
+  } catch (err) {
+    console.error('Errore setup aule:', err);
+    res.status(500).json({ error: 'Errore setup aule' });
+  }
+});
+
+
+
 //////////////////////////
 // AVVIO SERVER
 //////////////////////////
