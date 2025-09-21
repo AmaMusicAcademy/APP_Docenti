@@ -905,7 +905,7 @@ app.get('/api/setup-utenti', async (req, res) => {
   }
 });
 
-
+/*
 app.get('/api/forza-admin', async (req, res) => {
   try {
     const hashed = await bcrypt.hash('amamusic', 10);
@@ -922,7 +922,7 @@ app.get('/api/forza-admin', async (req, res) => {
     console.error(err);
     res.status(500).json({ message: 'Errore nel reinserimento admin' });
   }
-});
+});*/
 
 app.get('/api/insegnante/me', authenticateToken, async (req, res) => {
   try {
@@ -1426,7 +1426,7 @@ app.get('/api/setup-aule', async (_req, res) => {
 });
 
 
-
+/*
 // ⚠️ ENDPOINT TEMPORANEO: imposta/aggiorna l'utente "direzione" con password "amamusic"
 app.get('/api/forza-direzione', async (req, res) => {
   try {
@@ -1449,7 +1449,7 @@ app.get('/api/forza-direzione', async (req, res) => {
     console.error('Errore /api/forza-direzione:', err);
     res.status(500).json({ message: 'Errore nel setup di direzione' });
   }
-});
+});*/
 
 
 
