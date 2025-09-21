@@ -1427,6 +1427,43 @@ app.get('/api/setup-aule', async (_req, res) => {
 
 
 
+// ✅ RESET DATABASE PER VERSIONE BETA
+app.post('/api/reset-beta', authenticateToken, async (req, res) => {
+  try {
+    // Consenti solo ad admin
+    if (req.user.ruolo !== 'admin') {
+      return res.status(403).json({ error: 'Accesso negato' });
+    }
+
+    // 1. Svuota tabelle dipendenti (ordine importante per FK)
+    await pool.query(`TRUNCATE TABLE pagamenti_mensili RESTART IDENTITY CASCADE`);
+    await pool.query(`TRUNCATE TABLE lezioni RESTART IDENTITY CASCADE`);
+    await pool.query(`TRUNCATE TABLE allievi_insegnanti RESTART IDENTITY CASCADE`);
+    await pool.query(`TRUNCATE TABLE allievi RESTART IDENTITY CASCADE`);
+    await pool.query(`TRUNCATE TABLE insegnanti RESTART IDENTITY CASCADE`);
+    await pool.query(`TRUNCATE TABLE utenti RESTART IDENTITY CASCADE`);
+
+    // 2. Reinserisci solo gli account admin principali
+    const hashed1 = await bcrypt.hash('amamusic', 10);
+    const hashed2 = await bcrypt.hash('direzione', 10);
+
+    await pool.query(
+      `INSERT INTO utenti (username, password, ruolo)
+       VALUES 
+        ('segreteria', $1, 'admin'),
+        ('direzione', $2, 'admin')`,
+      [hashed1, hashed2]
+    );
+
+    res.json({ message: '✅ Reset completato. Restano solo segreteria e direzione.' });
+  } catch (err) {
+    console.error('Errore reset-beta:', err);
+    res.status(500).json({ error: 'Errore durante il reset' });
+  }
+});
+
+
+
 //////////////////////////
 // AVVIO SERVER
 //////////////////////////
