@@ -1428,7 +1428,7 @@ app.get('/api/setup-aule', async (_req, res) => {
 
 
 // ✅ RESET DATABASE PER VERSIONE BETA
-app.post('/api/reset-beta', authenticateToken, async (req, res) => {
+app.get('/api/reset-beta', authenticateToken, async (req, res) => {
   try {
     // Consenti solo ad admin
     if (req.user.ruolo !== 'admin') {
