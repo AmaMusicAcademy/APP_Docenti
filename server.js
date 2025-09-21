@@ -1427,38 +1427,27 @@ app.get('/api/setup-aule', async (_req, res) => {
 
 
 
-// ✅ RESET DATABASE PER VERSIONE BETA
-app.get('/api/reset-beta', authenticateToken, async (req, res) => {
+// ⚠️ ENDPOINT TEMPORANEO: imposta/aggiorna l'utente "direzione" con password "amamusic"
+app.get('/api/forza-direzione', async (req, res) => {
   try {
-    // Consenti solo ad admin
-    if (req.user.ruolo !== 'admin') {
-      return res.status(403).json({ error: 'Accesso negato' });
-    }
-
-    // 1. Svuota tabelle dipendenti (ordine importante per FK)
-    await pool.query(`TRUNCATE TABLE pagamenti_mensili RESTART IDENTITY CASCADE`);
-    await pool.query(`TRUNCATE TABLE lezioni RESTART IDENTITY CASCADE`);
-    await pool.query(`TRUNCATE TABLE allievi_insegnanti RESTART IDENTITY CASCADE`);
-    await pool.query(`TRUNCATE TABLE allievi RESTART IDENTITY CASCADE`);
-    await pool.query(`TRUNCATE TABLE insegnanti RESTART IDENTITY CASCADE`);
-    await pool.query(`TRUNCATE TABLE utenti RESTART IDENTITY CASCADE`);
-
-    // 2. Reinserisci solo gli account admin principali
-    const hashed1 = await bcrypt.hash('amamusic', 10);
-    const hashed2 = await bcrypt.hash('direzione', 10);
+    const hashed = await bcrypt.hash('amamusic', 10);
 
     await pool.query(
       `INSERT INTO utenti (username, password, ruolo)
-       VALUES 
-        ('segreteria', $1, 'admin'),
-        ('direzione', $2, 'admin')`,
-      [hashed1, hashed2]
+       VALUES ('direzione', $1, 'admin')
+       ON CONFLICT (username)
+       DO UPDATE SET password = EXCLUDED.password, ruolo = EXCLUDED.ruolo`,
+      [hashed]
     );
 
-    res.json({ message: '✅ Reset completato. Restano solo segreteria e direzione.' });
+    res.json({
+      message: 'Utente "direzione" impostato/aggiornato con successo',
+      username: 'direzione',
+      password_temporanea: 'amamusic' // 🔐 usa solo per il primo accesso e poi cambiala
+    });
   } catch (err) {
-    console.error('Errore reset-beta:', err);
-    res.status(500).json({ error: 'Errore durante il reset' });
+    console.error('Errore /api/forza-direzione:', err);
+    res.status(500).json({ message: 'Errore nel setup di direzione' });
   }
 });
 
