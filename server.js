@@ -1208,6 +1208,103 @@ app.get('/api/init-lezioni-history1', async (_req, res) => {
   }
 });
 
+// ===============================
+// QUOTE ASSOCIATIVE ANNUALI
+// ===============================
+
+// INIT tabella
+app.get('/api/init-quote-associative', async (_req, res) => {
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS quote_associative (
+        id SERIAL PRIMARY KEY,
+        allievo_id INTEGER REFERENCES allievi(id) ON DELETE CASCADE,
+        anno INTEGER NOT NULL,
+        pagata BOOLEAN NOT NULL DEFAULT FALSE,
+        data_pagamento DATE,
+        UNIQUE (allievo_id, anno)
+      );
+    `);
+    res.json({ message: '✅ Tabella quote_associative creata (o già esistente).' });
+  } catch (err) {
+    console.error('Errore creazione tabella quote_associative:', err);
+    res.status(500).json({ error: 'Errore nel setup quote associative' });
+  }
+});
+
+// GET tutte le quote associative di un allievo (storico)
+app.get('/api/allievi/:id/quote-associative', authenticateToken, async (req, res) => {
+  if (req.user.ruolo !== 'admin' && req.user.ruolo !== 'insegnante') {
+    return res.status(403).json({ message: 'Accesso negato' });
+  }
+  const { id } = req.params;
+  try {
+    const { rows } = await pool.query(
+      `SELECT anno, pagata, data_pagamento
+       FROM quote_associative
+       WHERE allievo_id = $1
+       ORDER BY anno DESC`,
+      [id]
+    );
+    res.json(rows);
+  } catch (err) {
+    console.error('Errore recupero quote associative:', err);
+    res.status(500).json({ error: 'Errore recupero quote associative' });
+  }
+});
+
+// UPSERT stato quota associativa (admin)
+app.post('/api/allievi/:id/quota-associativa', authenticateToken, async (req, res) => {
+  if (req.user.ruolo !== 'admin') {
+    return res.status(403).json({ message: 'Accesso negato' });
+  }
+  const { id } = req.params;
+  const { anno, pagata } = req.body; // pagata: true/false
+
+  if (!anno || !Number.isInteger(anno)) {
+    return res.status(400).json({ error: 'Anno non valido' });
+  }
+
+  try {
+    const { rows } = await pool.query(
+      `
+      INSERT INTO quote_associative (allievo_id, anno, pagata, data_pagamento)
+      VALUES ($1, $2, $3, CASE WHEN $3 THEN CURRENT_DATE ELSE NULL END)
+      ON CONFLICT (allievo_id, anno)
+      DO UPDATE SET
+        pagata = EXCLUDED.pagata,
+        data_pagamento = CASE WHEN EXCLUDED.pagata THEN CURRENT_DATE ELSE NULL END
+      RETURNING anno, pagata, data_pagamento
+      `,
+      [id, anno, !!pagata]
+    );
+    res.json(rows[0]);
+  } catch (err) {
+    console.error('Errore upsert quota associativa:', err);
+    res.status(500).json({ error: 'Errore salvataggio quota associativa' });
+  }
+});
+
+// DELETE (rimuovi record quota associativa per anno) — opzionale
+app.delete('/api/allievi/:id/quota-associativa', authenticateToken, async (req, res) => {
+  if (req.user.ruolo !== 'admin') {
+    return res.status(403).json({ message: 'Accesso negato' });
+  }
+  const { id } = req.params;
+  const { anno } = req.query;
+  if (!anno) return res.status(400).json({ error: 'Anno mancante' });
+
+  try {
+    const result = await pool.query(
+      `DELETE FROM quote_associative WHERE allievo_id = $1 AND anno = $2`,
+      [id, parseInt(anno, 10)]
+    );
+    res.json({ deleted: result.rowCount });
+  } catch (err) {
+    console.error('Errore delete quota associativa:', err);
+    res.status(500).json({ error: 'Errore eliminazione quota associativa' });
+  }
+});
 
 
 //////////////////////////
