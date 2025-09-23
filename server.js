@@ -1451,12 +1451,13 @@ app.get('/api/forza-direzione', async (req, res) => {
   }
 });*/
 
-// ⚠️ RESET COMPLETO DB (SOLO DEV) — GET /api/reset-db?token=...&seed=true
-app.get('/api/reset-db', async (req, res) => {
-  try {
-    const { token, seed } = req.query;
+// ⚠️ RESET & ALIGN (SVILUPPO) — GET /api/reset-clean?token=...&cleanUploads=true
+app.get('/api/reset-clean', async (req, res) => {
+  const { token, cleanUploads } = req.query;
+  const PRESERVE_USERS = ['segreteria', 'direzione'];
 
-    // 1) Sicurezza
+  try {
+    // Sicurezza base
     if (process.env.NODE_ENV === 'production') {
       return res.status(403).json({ error: 'Operazione non permessa in produzione' });
     }
@@ -1467,12 +1468,26 @@ app.get('/api/reset-db', async (req, res) => {
       return res.status(401).json({ error: 'Token non valido' });
     }
 
-    // 2) Svuota tabelle e azzera ID
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
 
-      // Ordine non necessario con TRUNCATE + CASCADE, ma elenco esplicito per chiarezza
+      // 1) Recupera utenti da preservare (per info nella risposta)
+      const preservedRes = await client.query(
+        `SELECT id, username, ruolo FROM utenti WHERE username = ANY($1)`,
+        [PRESERVE_USERS]
+      );
+      const preserved = preservedRes.rows;
+
+      // 2) Elimina tutti gli utenti tranne quelli da preservare (catturiamo quanti cancelliamo)
+      const deleteRes = await client.query(
+        `DELETE FROM utenti WHERE username NOT IN ($1, $2) RETURNING id, username`,
+        PRESERVE_USERS
+      );
+      const deletedUsers = deleteRes.rows || [];
+
+      // 3) TRUNCATE delle tabelle "dati" che vogliamo resettare (reinicializza le sequence)
+      //    Non tocchiamo la tabella "utenti" (abbiamo cancellato i non-preservati sopra).
       await client.query(`
         TRUNCATE TABLE
           pagamenti_mensili,
@@ -1481,90 +1496,63 @@ app.get('/api/reset-db', async (req, res) => {
           quote_associative,
           aule,
           allievi,
-          insegnanti,
-          utenti
+          insegnanti
         RESTART IDENTITY CASCADE
       `);
 
+      // 4) Riallinea la sequence di utenti al max(id)+1 (se ci sono solo i preserved, la sequence riparte dopo di loro)
+      //    pg_get_serial_sequence torna il nome della sequence (es. public.utenti_id_seq)
+      await client.query(`
+        SELECT setval(
+          pg_get_serial_sequence('utenti','id'),
+          COALESCE((SELECT MAX(id) FROM utenti), 0) + 1,
+          false
+        )
+      `);
+
       await client.query('COMMIT');
+
+      // 5) Pulizia opzionale uploads (fuori dalla transaction)
+      let uploadsDeleted = 0;
+      if (String(cleanUploads).toLowerCase() === 'true') {
+        try {
+          const uploadsDir = path.join(__dirname, 'uploads');
+          if (fs.existsSync(uploadsDir)) {
+            const files = fs.readdirSync(uploadsDir);
+            for (const f of files) {
+              const p = path.join(uploadsDir, f);
+              const stat = fs.statSync(p);
+              if (stat.isFile()) {
+                fs.unlinkSync(p);
+                uploadsDeleted++;
+              }
+            }
+          }
+        } catch (e) {
+          // Non blocchiamo: segnaliamo comunque l'errore
+          console.warn('Pulizia uploads fallita (non bloccante):', e.message);
+        }
+      }
+
+      return res.json({
+        ok: true,
+        message: 'Reset & alignment eseguiti (preservati account admin).',
+        preserved,
+        deletedUsersCount: deletedUsers.length,
+        deletedUsers,
+        uploadsDeleted,
+        note: 'Se vuoi anche rigenerare insegnanti/utenti demo, posso aggiungere una variante ?seed=true'
+      });
     } catch (e) {
       await client.query('ROLLBACK');
-      console.error('Errore TRUNCATE:', e);
-      return res.status(500).json({ error: 'Errore nel reset dei dati' });
+      console.error('Errore durante reset-clean transaction:', e);
+      return res.status(500).json({ error: 'Errore durante reset-clean', details: String(e) });
     } finally {
       client.release();
     }
-
-    // 3) Pulisci cartella uploads (solo file)
-    try {
-      const uploadsDir = path.join(__dirname, 'uploads');
-      if (fs.existsSync(uploadsDir)) {
-        const files = fs.readdirSync(uploadsDir);
-        for (const f of files) {
-          const p = path.join(uploadsDir, f);
-          const stat = fs.statSync(p);
-          if (stat.isFile()) {
-            fs.unlinkSync(p);
-          }
-        }
-      } else {
-        fs.mkdirSync(uploadsDir, { recursive: true });
-      }
-    } catch (e) {
-      console.warn('Pulizia uploads fallita (non bloccante):', e.message);
-    }
-
-    const summary = { truncated: true, seeded: false, users: [] };
-
-    // 4) Seed opzionale utenti base
-    if (String(seed).toLowerCase() === 'true') {
-      try {
-        const hashedAdmin = await bcrypt.hash('admin', 10);
-        const hashedAmamusic = await bcrypt.hash('amamusic', 10);
-
-        // admin
-        await pool.query(
-          `INSERT INTO utenti (username, password, ruolo)
-           VALUES ($1, $2, 'admin')
-           ON CONFLICT (username) DO UPDATE SET password = EXCLUDED.password, ruolo = EXCLUDED.ruolo`,
-          ['admin', hashedAdmin]
-        );
-        summary.users.push({ username: 'admin', ruolo: 'admin', pwd: 'admin' });
-
-        // segreteria
-        await pool.query(
-          `INSERT INTO utenti (username, password, ruolo)
-           VALUES ($1, $2, 'admin')
-           ON CONFLICT (username) DO UPDATE SET password = EXCLUDED.password, ruolo = EXCLUDED.ruolo`,
-          ['segreteria', hashedAmamusic]
-        );
-        summary.users.push({ username: 'segreteria', ruolo: 'admin', pwd: 'amamusic' });
-
-        // direzione
-        await pool.query(
-          `INSERT INTO utenti (username, password, ruolo)
-           VALUES ($1, $2, 'admin')
-           ON CONFLICT (username) DO UPDATE SET password = EXCLUDED.password, ruolo = EXCLUDED.ruolo`,
-          ['direzione', hashedAmamusic]
-        );
-        summary.users.push({ username: 'direzione', ruolo: 'admin', pwd: 'amamusic' });
-
-        summary.seeded = true;
-      } catch (e) {
-        console.error('Errore seed utenti base:', e);
-        return res.status(500).json({ error: 'Reset ok, ma seed utenti base fallito' });
-      }
-    }
-
-    // 5) Risposta finale
-    return res.json({
-      message: '✅ Reset eseguito',
-      note: 'Gli ID ripartono da 1. Se hai bisogno di dati demo, usa ?seed=true.',
-      ...summary
-    });
   } catch (err) {
-    console.error('Errore /api/reset-db:', err);
-    return res.status(500).json({ error: 'Errore imprevisto nel reset' });
+    console.error('Errore /api/reset-clean:', err);
+    return res.status(500).json({ error: 'Errore imprevisto' });
   }
 });
 
