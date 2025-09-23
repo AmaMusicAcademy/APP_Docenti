@@ -1451,7 +1451,122 @@ app.get('/api/forza-direzione', async (req, res) => {
   }
 });*/
 
+// ⚠️ RESET COMPLETO DB (SOLO DEV) — GET /api/reset-db?token=...&seed=true
+app.get('/api/reset-db', async (req, res) => {
+  try {
+    const { token, seed } = req.query;
 
+    // 1) Sicurezza
+    if (process.env.NODE_ENV === 'production') {
+      return res.status(403).json({ error: 'Operazione non permessa in produzione' });
+    }
+    if (!process.env.RESET_TOKEN) {
+      return res.status(500).json({ error: 'RESET_TOKEN non configurato' });
+    }
+    if (token !== process.env.RESET_TOKEN) {
+      return res.status(401).json({ error: 'Token non valido' });
+    }
+
+    // 2) Svuota tabelle e azzera ID
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      // Ordine non necessario con TRUNCATE + CASCADE, ma elenco esplicito per chiarezza
+      await client.query(`
+        TRUNCATE TABLE
+          pagamenti_mensili,
+          allievi_insegnanti,
+          lezioni,
+          quote_associative,
+          aule,
+          allievi,
+          insegnanti,
+          utenti
+        RESTART IDENTITY CASCADE
+      `);
+
+      await client.query('COMMIT');
+    } catch (e) {
+      await client.query('ROLLBACK');
+      console.error('Errore TRUNCATE:', e);
+      return res.status(500).json({ error: 'Errore nel reset dei dati' });
+    } finally {
+      client.release();
+    }
+
+    // 3) Pulisci cartella uploads (solo file)
+    try {
+      const uploadsDir = path.join(__dirname, 'uploads');
+      if (fs.existsSync(uploadsDir)) {
+        const files = fs.readdirSync(uploadsDir);
+        for (const f of files) {
+          const p = path.join(uploadsDir, f);
+          const stat = fs.statSync(p);
+          if (stat.isFile()) {
+            fs.unlinkSync(p);
+          }
+        }
+      } else {
+        fs.mkdirSync(uploadsDir, { recursive: true });
+      }
+    } catch (e) {
+      console.warn('Pulizia uploads fallita (non bloccante):', e.message);
+    }
+
+    const summary = { truncated: true, seeded: false, users: [] };
+
+    // 4) Seed opzionale utenti base
+    if (String(seed).toLowerCase() === 'true') {
+      try {
+        const hashedAdmin = await bcrypt.hash('admin', 10);
+        const hashedAmamusic = await bcrypt.hash('amamusic', 10);
+
+        // admin
+        await pool.query(
+          `INSERT INTO utenti (username, password, ruolo)
+           VALUES ($1, $2, 'admin')
+           ON CONFLICT (username) DO UPDATE SET password = EXCLUDED.password, ruolo = EXCLUDED.ruolo`,
+          ['admin', hashedAdmin]
+        );
+        summary.users.push({ username: 'admin', ruolo: 'admin', pwd: 'admin' });
+
+        // segreteria
+        await pool.query(
+          `INSERT INTO utenti (username, password, ruolo)
+           VALUES ($1, $2, 'admin')
+           ON CONFLICT (username) DO UPDATE SET password = EXCLUDED.password, ruolo = EXCLUDED.ruolo`,
+          ['segreteria', hashedAmamusic]
+        );
+        summary.users.push({ username: 'segreteria', ruolo: 'admin', pwd: 'amamusic' });
+
+        // direzione
+        await pool.query(
+          `INSERT INTO utenti (username, password, ruolo)
+           VALUES ($1, $2, 'admin')
+           ON CONFLICT (username) DO UPDATE SET password = EXCLUDED.password, ruolo = EXCLUDED.ruolo`,
+          ['direzione', hashedAmamusic]
+        );
+        summary.users.push({ username: 'direzione', ruolo: 'admin', pwd: 'amamusic' });
+
+        summary.seeded = true;
+      } catch (e) {
+        console.error('Errore seed utenti base:', e);
+        return res.status(500).json({ error: 'Reset ok, ma seed utenti base fallito' });
+      }
+    }
+
+    // 5) Risposta finale
+    return res.json({
+      message: '✅ Reset eseguito',
+      note: 'Gli ID ripartono da 1. Se hai bisogno di dati demo, usa ?seed=true.',
+      ...summary
+    });
+  } catch (err) {
+    console.error('Errore /api/reset-db:', err);
+    return res.status(500).json({ error: 'Errore imprevisto nel reset' });
+  }
+});
 
 //////////////////////////
 // AVVIO SERVER
