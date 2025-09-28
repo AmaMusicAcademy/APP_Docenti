@@ -1221,6 +1221,30 @@ app.get('/api/reset-clean', async (req, res) => {
   }
 });
 
+// ⚠️ solo uso temporaneo
+app.get('/api/fix-insegnanti-utenti', async (req, res) => {
+  try {
+    const insegnanti = await pool.query(`SELECT username, password_hash FROM insegnanti`);
+    let creati = 0;
+
+    for (const ins of insegnanti.rows) {
+      if (!ins.username || !ins.password_hash) continue;
+      await pool.query(
+        `INSERT INTO utenti (username, password, ruolo)
+         VALUES ($1, $2, 'insegnante')
+         ON CONFLICT (username) DO NOTHING`,
+        [ins.username, ins.password_hash]
+      );
+      creati++;
+    }
+
+    res.json({ message: `Allineamento completato`, utentiInseriti: creati });
+  } catch (err) {
+    console.error('Errore fix insegnanti->utenti:', err);
+    res.status(500).json({ error: 'Errore durante il fix' });
+  }
+});
+
 // ---------- AVVIO SERVER ----------
 app.listen(PORT, () => {
   console.log(`Server in ascolto sulla porta ${PORT}`);
