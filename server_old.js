@@ -1,4 +1,3 @@
-
 const express = require('express');
 const cors = require('cors');
 const bcrypt = require('bcrypt');
@@ -13,16 +12,15 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const JWT_SECRET = process.env.JWT_SECRET || 'supersegreto';
 
-// CORS
+//app.use(cors());
 app.use(cors({
-  origin: ["https://accademia-frontend.vercel.app"],
+  origin: ["https://accademia-frontend.vercel.app"], // oppure "*" in sviluppo
   credentials: true,
 }));
 
 app.use(express.json());
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
-// Multer storage
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
     cb(null, 'uploads/');
@@ -35,37 +33,36 @@ const storage = multer.diskStorage({
 });
 const upload = multer({ storage });
 
-// --------- Helpers ---------
-async function getMyTeacherId(clientOrPool, username) {
-  const q = await clientOrPool.query(`SELECT id FROM insegnanti WHERE username = $1 LIMIT 1`, [username]);
-  return q.rows?.[0]?.id || null;
-}
 
-// Middleware per autenticazione (risposte JSON)
+// Middleware per autenticazione
 function authenticateToken(req, res, next) {
   const authHeader = req.headers['authorization'];
   const token = authHeader && authHeader.split(' ')[1];
-  if (!token) return res.status(401).json({ error: 'Token mancante' });
+  if (!token) return res.sendStatus(401);
 
   jwt.verify(token, JWT_SECRET, (err, user) => {
-    if (err) return res.status(403).json({ error: 'Token non valido' });
-    req.user = user; // { id, username, ruolo, insegnanteId? }
+    if (err) return res.sendStatus(403);
+    req.user = user;
     next();
   });
 }
 
-// ---------- AVATAR ----------
+//CARICARE AVATAR
 app.post('/api/avatar', upload.single('avatar'), async (req, res) => {
   const token = req.headers.authorization?.split(' ')[1];
   if (!token || !req.file) return res.status(400).json({ message: 'Token o file mancante' });
 
   try {
     const decoded = jwt.verify(token, JWT_SECRET);
+    const id = decoded.id;
+
     const avatarUrl = `/uploads/${req.file.filename}`;
+
     await pool.query(
-      'UPDATE insegnanti SET avatar_url = $1 WHERE username = $2',
-      [avatarUrl, decoded.username]
+      'UPDATE insegnanti SET avatar_url = $1 WHERE id = $2',
+      [avatarUrl, id]
     );
+
     res.json({ message: 'Avatar aggiornato', avatarUrl });
   } catch (err) {
     console.error('Errore upload avatar:', err);
@@ -83,43 +80,62 @@ app.post('/api/setup-avatar-column', async (req, res) => {
   }
 });
 
-// ---------- LOGIN ----------
+
+//////////////////////////
+// LOGIN
+//////////////////////////
+
 app.post('/api/login', async (req, res) => {
   const { username, password } = req.body;
+
   try {
+    // 🔍 Cerca prima negli utenti (admin o insegnanti con login)
     const result = await pool.query('SELECT * FROM utenti WHERE username = $1', [username]);
+
     if (result.rows.length === 0) {
       return res.status(401).json({ message: 'Credenziali non valide' });
     }
+
     const user = result.rows[0];
     const match = await bcrypt.compare(password, user.password);
+
     if (!match) return res.status(401).json({ message: 'Credenziali non valide' });
 
-    // includo anche l'id dell'insegnante (se presente) nel token
-    const iRes = await pool.query(`SELECT id FROM insegnanti WHERE username = $1 LIMIT 1`, [user.username]);
-    const insegnanteId = iRes.rows?.[0]?.id || null;
+    const token = jwt.sign({ id: user.id, username: user.username, ruolo: user.ruolo }, JWT_SECRET);
 
-    const payload = { id: user.id, username: user.username, ruolo: user.ruolo, insegnanteId };
-    // Strada A: token senza scadenza
-    const token = jwt.sign(payload, JWT_SECRET);
-
-    res.json({ message: 'Login riuscito', token, ruolo: user.ruolo, username: user.username });
+    res.json({
+      message: 'Login riuscito',
+      token,
+      ruolo: user.ruolo,
+      username: user.username
+    });
   } catch (err) {
     console.error('Errore login:', err);
     res.status(500).json({ message: 'Errore server' });
   }
 });
 
-// ---------- CAMBIO PASSWORD (insegnanti) ----------
+
+//////////////////////////
+// CAMBIO password
+//////////////////////////
+
 app.post('/api/cambia-password', async (req, res) => {
   const { id, nuovaPassword } = req.body;
+
   if (!id || !nuovaPassword) {
     return res.status(400).json({ message: 'Dati mancanti' });
   }
+
   try {
     const salt = await bcrypt.genSalt(10);
     const hash = await bcrypt.hash(nuovaPassword, salt);
-    await pool.query('UPDATE insegnanti SET password_hash = $1 WHERE id = $2', [hash, id]);
+
+    await pool.query(
+      'UPDATE insegnanti SET password_hash = $1 WHERE id = $2',
+      [hash, id]
+    );
+
     res.json({ message: 'Password aggiornata con successo' });
   } catch (err) {
     console.error('Errore durante il cambio password:', err);
@@ -127,7 +143,11 @@ app.post('/api/cambia-password', async (req, res) => {
   }
 });
 
-// ---------- CREAZIONE INSEGNANTE (e utente) ----------
+
+//////////////////////////
+// CREAZIONE INSEGNANTE con username/password
+//////////////////////////
+
 app.post('/api/insegnanti', async (req, res) => {
   const { nome, cognome } = req.body;
   try {
@@ -135,22 +155,27 @@ app.post('/api/insegnanti', async (req, res) => {
     const password = 'amamusic';
     const password_hash = await bcrypt.hash(password, 10);
 
+    // Inserisci nella tabella "insegnanti"
     const { rows } = await pool.query(
       'INSERT INTO insegnanti (nome, cognome, username, password_hash) VALUES ($1, $2, $3, $4) RETURNING *',
       [nome, cognome, username, password_hash]
     );
+
+    // Inserisci anche nella tabella "utenti"
     await pool.query(
       `INSERT INTO utenti (username, password, ruolo)
        VALUES ($1, $2, $3)
        ON CONFLICT (username) DO NOTHING`,
       [username, password_hash, 'insegnante']
     );
+
     res.status(201).json({ ...rows[0], password_iniziale: password });
   } catch (err) {
     console.error('Errore creazione insegnante:', err);
     res.status(500).json({ error: 'Errore nella creazione insegnante' });
   }
 });
+
 
 // GET tutti gli insegnanti
 app.get('/api/insegnanti', async (req, res) => {
@@ -163,19 +188,26 @@ app.get('/api/insegnanti', async (req, res) => {
   }
 });
 
-// Associazioni allievo-insegnanti
 app.post('/api/allievi/:id/insegnanti', async (req, res) => {
   const { id } = req.params;
   const { insegnanti } = req.body;
+
   if (!Array.isArray(insegnanti)) {
     return res.status(400).json({ error: 'Formato non valido' });
   }
+
   try {
     await pool.query('DELETE FROM allievi_insegnanti WHERE allievo_id = $1', [id]);
+
     const insertPromises = insegnanti.map((insegnanteId) =>
-      pool.query('INSERT INTO allievi_insegnanti (allievo_id, insegnante_id) VALUES ($1, $2)', [id, insegnanteId])
+      pool.query(
+        'INSERT INTO allievi_insegnanti (allievo_id, insegnante_id) VALUES ($1, $2)',
+        [id, insegnanteId]
+      )
     );
+
     await Promise.all(insertPromises);
+
     res.json({ message: 'Assegnazioni salvate con successo' });
   } catch (err) {
     console.error('Errore nel salvataggio assegnazioni:', err);
@@ -185,6 +217,7 @@ app.post('/api/allievi/:id/insegnanti', async (req, res) => {
 
 app.get('/api/allievi/:id/insegnanti', async (req, res) => {
   const { id } = req.params;
+
   try {
     const { rows } = await pool.query(`
       SELECT i.id, i.nome, i.cognome
@@ -192,31 +225,40 @@ app.get('/api/allievi/:id/insegnanti', async (req, res) => {
       JOIN allievi_insegnanti ai ON i.id = ai.insegnante_id
       WHERE ai.allievo_id = $1
     `, [id]);
-    res.json(rows);
+
+    res.json(rows); // restituisce un array di insegnanti già assegnati
   } catch (err) {
     console.error('Errore nel recupero assegnazioni:', err);
     res.status(500).json({ error: 'Errore nel recupero assegnazioni' });
   }
 });
 
-// ---------- PROFILO INSEGNANTE (protetto) ----------
+
+
+//////////////////////////
+// PROTEZIONE PROFILO INSEGNANTE
+//////////////////////////
+
 app.get('/api/insegnanti/:id', authenticateToken, async (req, res) => {
   const { id } = req.params;
+
+  if (req.user.id != id && req.user.ruolo !== 'admin') {
+    return res.status(403).json({ error: 'Accesso non autorizzato' });
+  }
+
   try {
     const { rows } = await pool.query('SELECT * FROM insegnanti WHERE id = $1', [id]);
-    if (!rows.length) return res.status(404).json({ error: 'Insegnante non trovato' });
-    const insegnante = rows[0];
-    if (req.user.ruolo !== 'admin' && insegnante.username !== req.user.username) {
-      return res.status(403).json({ error: 'Accesso non autorizzato' });
-    }
-    res.json(insegnante);
+    if (rows.length === 0) return res.status(404).json({ error: 'Insegnante non trovato' });
+    res.json(rows[0]);
   } catch (err) {
-    console.error('GET /api/insegnanti/:id', err);
     res.status(500).json({ error: 'Errore nel recupero insegnante' });
   }
 });
 
-// Aggiunta colonne auth
+//////////////////////////
+// AGGIUNTA COLONNE auth (per compatibilità con vecchie tabelle)
+//////////////////////////
+
 app.get('/api/alter-insegnanti-auth', async (req, res) => {
   try {
     await pool.query(`
@@ -231,28 +273,36 @@ app.get('/api/alter-insegnanti-auth', async (req, res) => {
   }
 });
 
+/*// ⚠️ ENDPOINT TEMPORANEO per aggiornare user e password di un insegnante
 app.post('/api/setup-credentials', async (req, res) => {
   const { nome, cognome, username, password } = req.body;
+
   if (!nome || !cognome || !username || !password) {
     return res.status(400).json({ error: 'Nome, cognome, username e password sono obbligatori' });
   }
+
   try {
     const hash = await bcrypt.hash(password, 10);
+
     const result = await pool.query(`
       UPDATE insegnanti
       SET username = $1, password_hash = $2
       WHERE nome = $3 AND cognome = $4
       RETURNING *
     `, [username, hash, nome, cognome]);
-    if (result.rowCount === 0) return res.status(404).json({ error: 'Insegnante non trovato' });
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({ error: 'Insegnante non trovato' });
+    }
+
     res.json({ message: 'Credenziali aggiornate', insegnante: result.rows[0] });
   } catch (err) {
     console.error('Errore durante aggiornamento credenziali:', err);
     res.status(500).json({ error: 'Errore durante aggiornamento credenziali' });
   }
-});
+});*/
 
-// ---------- CONTEGGIO LEZIONI ----------
+// GET conteggio lezioni per stato + riprogrammate
 app.get('/api/allievi/:id/conteggio-lezioni', async (req, res) => {
   const { id } = req.params;
   const { start, end } = req.query;
@@ -265,17 +315,35 @@ app.get('/api/allievi/:id/conteggio-lezioni', async (req, res) => {
   const conditions = [];
   const params = [id];
 
-  if (start) { conditions.push(`data >= $${params.length + 1}`); params.push(start); }
-  if (end)   { conditions.push(`data <= $${params.length + 1}`); params.push(end); }
+  if (start) {
+    conditions.push(`data >= $${params.length + 1}`);
+    params.push(start);
+  }
+
+  if (end) {
+    conditions.push(`data <= $${params.length + 1}`);
+    params.push(end);
+  }
 
   const whereClause = conditions.length > 0 ? ` AND ${conditions.join(' AND ')}` : '';
 
   try {
-    const { rows } = await pool.query(`${baseQuery} ${whereClause} GROUP BY stato, riprogrammata`, params);
-    const result = { svolte: 0, annullate: 0, rimandate: 0, riprogrammate: 0 };
+    const { rows } = await pool.query(`
+      ${baseQuery} ${whereClause}
+      GROUP BY stato, riprogrammata
+    `, params);
+
+    const result = {
+      svolte: 0,
+      annullate: 0,
+      rimandate: 0,
+      riprogrammate: 0
+    };
+
     for (const row of rows) {
       const stato = row.stato;
       const riprogrammata = row.riprogrammata;
+
       if (stato === 'svolta') result.svolte += parseInt(row.count, 10);
       else if (stato === 'annullata') result.annullate += parseInt(row.count, 10);
       else if (stato === 'rimandata') {
@@ -283,6 +351,7 @@ app.get('/api/allievi/:id/conteggio-lezioni', async (req, res) => {
         else result.rimandate += parseInt(row.count, 10);
       }
     }
+
     res.json(result);
   } catch (err) {
     console.error('Errore nel conteggio lezioni per stato:', err);
@@ -290,15 +359,19 @@ app.get('/api/allievi/:id/conteggio-lezioni', async (req, res) => {
   }
 });
 
-// ---------- COMPENSO MENSILE INSEGNANTE ----------
+// GET compenso mensile di un insegnante
 app.get('/api/insegnanti/:id/compenso', async (req, res) => {
   const { id } = req.params;
-  const { mese } = req.query;
+  const { mese } = req.query; // formato atteso: '2025-06'
+
   if (!mese || !/^\d{4}-\d{2}$/.test(mese)) {
     return res.status(400).json({ error: 'Parametro "mese" non valido. Usa formato YYYY-MM.' });
   }
+
   try {
     const startDate = new Date(`${mese}-01`);
+    const endDate = new Date(startDate.getFullYear(), startDate.getMonth() + 1, 0); // ultimo giorno del mese
+
     const result = await pool.query(`
       SELECT data, ora_inizio, ora_fine, stato, riprogrammata
       FROM lezioni
@@ -312,39 +385,67 @@ app.get('/api/insegnanti/:id/compenso', async (req, res) => {
 
     let oreTotali = 0;
     const compensoOrario = 15;
+
     for (const row of result.rows) {
+      // Calcolo ore: fine - inizio
       const inizio = row.ora_inizio;
       const fine = row.ora_fine;
+
       const ore =
-        (new Date(`1970-01-01T${fine}Z`) - new Date(`1970-01-01T${inizio}Z`)) / (1000 * 60 * 60);
+        (new Date(`1970-01-01T${fine}Z`) - new Date(`1970-01-01T${inizio}Z`)) /
+        (1000 * 60 * 60);
+
       oreTotali += ore;
     }
+
     const compenso = Math.round(oreTotali * compensoOrario);
-    res.json({ mese, lezioniPagate: result.rowCount, oreTotali, compenso });
+
+    res.json({
+      mese,
+      lezioniPagate: result.rowCount,
+      oreTotali,
+      compenso
+    });
   } catch (err) {
     console.error('Errore nel calcolo compenso:', err);
     res.status(500).json({ error: 'Errore nel calcolo compenso' });
   }
 });
 
-// ---------- LEZIONI (lista completa per calendario) ----------
+// ✅ GET tutte le lezioni con info insegnante e allievo
 app.get('/api/lezioni', async (req, res) => {
   try {
     const { rows } = await pool.query(`
       SELECT 
-        l.id, l.data, l.ora_inizio, l.ora_fine, l.aula, l.stato, l.motivazione,
-        l.riprogrammata, l.storico_programmazioni, l.id_insegnante, l.id_allievo,
-        i.nome AS nome_insegnante, i.cognome AS cognome_insegnante,
-        a.nome AS nome_allievo, a.cognome AS cognome_allievo
+        l.id,
+        l.data,
+        l.ora_inizio,
+        l.ora_fine,
+        l.aula,
+        l.stato,
+        l.motivazione,
+        l.riprogrammata,
+        l.storico_programmazioni,  -- 👈 include lo storico (JSONB)
+        l.id_insegnante,
+        l.id_allievo,
+        i.nome   AS nome_insegnante,
+        i.cognome AS cognome_insegnante,
+        a.nome   AS nome_allievo,
+        a.cognome AS cognome_allievo
       FROM lezioni l
       LEFT JOIN insegnanti i ON l.id_insegnante = i.id
       LEFT JOIN allievi a     ON l.id_allievo     = a.id
     `);
 
+    // Helpers per sicurezza formati
     const dateOnly = (d) => {
       if (!d) return null;
       if (typeof d === 'string') return d.slice(0, 10);
-      try { return new Date(d).toISOString().slice(0, 10); } catch { return String(d).slice(0, 10); }
+      try {
+        return new Date(d).toISOString().slice(0, 10);
+      } catch {
+        return String(d).slice(0, 10);
+      }
     };
     const hhmm = (t) => (t ? String(t).slice(0, 5) : null);
 
@@ -354,27 +455,37 @@ app.get('/api/lezioni', async (req, res) => {
         const ymd = dateOnly(lezione.data);
         const oi  = hhmm(lezione.ora_inizio);
         const of  = hhmm(lezione.ora_fine);
+
         return {
           id: lezione.id,
           id_insegnante: lezione.id_insegnante,
           id_allievo: lezione.id_allievo,
+
           nome_insegnante: lezione.nome_insegnante,
           cognome_insegnante: lezione.cognome_insegnante,
           nome_allievo: lezione.nome_allievo,
           cognome_allievo: lezione.cognome_allievo,
+
           aula: lezione.aula,
-          stato: lezione.stato,
+          stato: lezione.stato,                  // es. "svolta" | "rimandata" | "annullata"
           motivazione: lezione.motivazione,
-          riprogrammata: lezione.riprogrammata,
-          storico_programmazioni: Array.isArray(lezione.storico_programmazioni) ? lezione.storico_programmazioni : (lezione.storico_programmazioni || []),
+          riprogrammata: lezione.riprogrammata,  // 👈 boolean
+          storico_programmazioni: Array.isArray(lezione.storico_programmazioni)
+            ? lezione.storico_programmazioni
+            : (lezione.storico_programmazioni || []), // 👈 array di {data,ora_inizio,ora_fine,aula,recorded_at}
+
+          // campi "view" per FullCalendar
           title: `Lezione con ${lezione.nome_allievo || 'Allievo'}${lezione.aula ? ` - Aula ${lezione.aula}` : ''}`,
           start: ymd && oi ? `${ymd}T${oi}` : null,
           end:   ymd && of ? `${ymd}T${of}` : null,
+
+          // campi "raw" utili al frontend
           data: ymd,
           ora_inizio: oi,
           ora_fine: of
         };
       });
+
     res.json(eventi);
   } catch (err) {
     console.error('Errore nel recupero lezioni:', err);
@@ -382,12 +493,18 @@ app.get('/api/lezioni', async (req, res) => {
   }
 });
 
-// CREATE lezione (protetto)
+
 app.post('/api/lezioni', authenticateToken, async (req, res) => {
   try {
     const {
-      id_insegnante, id_allievo, data, ora_inizio, ora_fine, aula,
-      stato = 'svolta', motivazione = null
+      id_insegnante,
+      id_allievo,
+      data,          // "YYYY-MM-DD"
+      ora_inizio,    // "HH:MM" o "HH:MM:SS"
+      ora_fine,      // "
+      aula,
+      stato = 'svolta',
+      motivazione = null
     } = req.body;
 
     if (!id_insegnante || !id_allievo || !data || !ora_inizio || !ora_fine || !aula) {
@@ -395,25 +512,31 @@ app.post('/api/lezioni', authenticateToken, async (req, res) => {
     }
 
     // Autorizzazione: admin può tutto; insegnante solo su se stesso
-    if (req.user.ruolo !== 'admin') {
-      const myTeacherId = req.user.insegnanteId || await getMyTeacherId(pool, req.user.username);
-      if (String(myTeacherId) !== String(id_insegnante)) {
-        return res.status(403).json({ error: 'Accesso non autorizzato' });
-      }
+    if (req.user.ruolo !== 'admin' && String(req.user.id) !== String(id_insegnante)) {
+      return res.status(403).json({ error: 'Accesso non autorizzato' });
     }
 
+    // (facoltativo) verifica sovrapposizioni della stessa aula o stesso insegnante, ecc.
+
     const insert = await pool.query(
-      `INSERT INTO lezioni (
+      `
+      INSERT INTO lezioni (
         id_insegnante, id_allievo, data, ora_inizio, ora_fine, aula, stato, motivazione, riprogrammata
-      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,false) RETURNING *`,
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,false)
+      RETURNING *
+      `,
       [id_insegnante, id_allievo, data, ora_inizio, ora_fine, aula, stato, motivazione]
     );
 
     const row = insert.rows[0];
+
+    // (facoltativo) arricchisci con nome allievo
     const dett = await pool.query(
-      `SELECT a.nome AS nome_allievo, a.cognome AS cognome_allievo FROM allievi a WHERE a.id = $1`, [row.id_allievo]
+      `SELECT a.nome AS nome_allievo, a.cognome AS cognome_allievo
+       FROM allievi a WHERE a.id = $1`, [row.id_allievo]
     );
     const allievo = dett.rows[0] || {};
+
     const dataSolo = String(row.data).slice(0,10);
     res.status(201).json({
       ...row,
@@ -432,7 +555,10 @@ app.post('/api/lezioni', authenticateToken, async (req, res) => {
 app.get('/api/lezioni/:id', async (req, res) => {
   const { id } = req.params;
   try {
-    const { rows } = await pool.query('SELECT * FROM lezioni WHERE id = $1', [id]);
+    const { rows } = await pool.query(
+      'SELECT * FROM lezioni WHERE id = $1',
+      [id]
+    );
     if (rows.length === 0) return res.status(404).json({ error: 'Lezione non trovata' });
     res.json(rows[0]);
   } catch (err) {
@@ -440,36 +566,50 @@ app.get('/api/lezioni/:id', async (req, res) => {
   }
 });
 
-// UPDATE lezione (protetto)
 app.put('/api/lezioni/:id', authenticateToken, async (req, res) => {
   const { id } = req.params;
-  const { id_insegnante, id_allievo, data, ora_inizio, ora_fine, aula, stato, motivazione = '' } = req.body;
+  const {
+    id_insegnante,
+    id_allievo,
+    data,
+    ora_inizio,
+    ora_fine,
+    aula,
+    stato,
+    motivazione = ''
+  } = req.body;
 
   const onlyHHMM = (t) => (t ? String(t).slice(0, 5) : "");
   const onlyYMD  = (d) => (d ? String(d).slice(0, 10) : "");
 
+  // parser sicuro per JSON/JSONB
   const parseHistory = (v) => {
     if (Array.isArray(v)) return v;
-    if (typeof v === 'string') { try { const p = JSON.parse(v); return Array.isArray(p) ? p : []; } catch { return []; } }
+    if (typeof v === 'string') {
+      try { const p = JSON.parse(v); return Array.isArray(p) ? p : []; } catch { return []; }
+    }
     return [];
   };
 
   try {
+    // 1) leggi lezione corrente
     const curRes = await pool.query('SELECT * FROM lezioni WHERE id = $1', [id]);
-    if (!curRes.rows.length) return res.status(404).json({ error: 'Lezione non trovata' });
+    if (curRes.rows.length === 0) return res.status(404).json({ error: 'Lezione non trovata' });
     const cur = curRes.rows[0];
 
-    if (req.user.ruolo !== 'admin') {
-      const myTeacherId = req.user.insegnanteId || await getMyTeacherId(pool, req.user.username);
-      if (String(myTeacherId) !== String(cur.id_insegnante)) {
-        return res.status(403).json({ error: 'Accesso non autorizzato' });
-      }
+    // Autorizzazione: admin ok; insegnante solo su se stesso
+    if (req.user.ruolo !== 'admin' && String(req.user.id) !== String(cur.id_insegnante)) {
+      return res.status(403).json({ error: 'Accesso non autorizzato' });
     }
 
+    // 2) conflitti aula/orari se completi
     if (data && ora_inizio && ora_fine && aula) {
       const conflictQuery = `
         SELECT 1 FROM lezioni
-        WHERE id != $1 AND data = $2 AND aula = $3 AND ($4 < ora_fine AND $5 > ora_inizio)
+        WHERE id != $1
+          AND data = $2
+          AND aula = $3
+          AND ($4 < ora_fine AND $5 > ora_inizio)
         LIMIT 1
       `;
       const conflictValues = [id, data, aula, ora_inizio, ora_fine];
@@ -479,25 +619,30 @@ app.put('/api/lezioni/:id', authenticateToken, async (req, res) => {
       }
     }
 
-    const dateChanged  = (data != null)       && (onlyYMD(data)        !== onlyYMD(cur.data));
+    // 3) rileva cambi di programmazione NORMALIZZANDO
+    const dateChanged  = (data != null)      && (onlyYMD(data)      !== onlyYMD(cur.data));
     const startChanged = (ora_inizio != null) && (onlyHHMM(ora_inizio) !== onlyHHMM(cur.ora_inizio));
     const endChanged   = (ora_fine   != null) && (onlyHHMM(ora_fine)   !== onlyHHMM(cur.ora_fine));
     const roomChanged  = (aula       != null) && (String(aula).trim()  !== String(cur.aula || '').trim());
     const scheduleChanged = dateChanged || startChanged || endChanged || roomChanged;
 
+    // 4) calcola riprogrammata + history
     let newRiprogrammata = false;
     let newOld = parseHistory(cur.old_schedules);
 
     if ((stato ?? cur.stato) === 'rimandata') {
       if (scheduleChanged) {
         newRiprogrammata = true;
-        newOld = [...newOld, {
-          data: onlyYMD(cur.data),
-          ora_inizio: onlyHHMM(cur.ora_inizio),
-          ora_fine: onlyHHMM(cur.ora_fine),
-          aula: cur.aula,
-          changed_at: new Date().toISOString()
-        }];
+        newOld = [
+          ...newOld,
+          {
+            data: onlyYMD(cur.data),
+            ora_inizio: onlyHHMM(cur.ora_inizio),
+            ora_fine: onlyHHMM(cur.ora_fine),
+            aula: cur.aula,
+            changed_at: new Date().toISOString()
+          }
+        ];
       } else {
         newRiprogrammata = false;
       }
@@ -505,6 +650,7 @@ app.put('/api/lezioni/:id', authenticateToken, async (req, res) => {
       newRiprogrammata = false;
     }
 
+    // 5) update
     const updateQuery = `
       UPDATE lezioni SET 
         id_insegnante = $1, 
@@ -541,20 +687,20 @@ app.put('/api/lezioni/:id', authenticateToken, async (req, res) => {
   }
 });
 
-// PATCH rimanda
+// ✅ PATCH: forza RIMANDA senza toccare data/ora/aula
 app.patch('/api/lezioni/:id/rimanda', authenticateToken, async (req, res) => {
   const { id } = req.params;
   const { motivazione = '' } = req.body;
+
   try {
+    // leggi la lezione per autorizzazione
     const curRes = await pool.query('SELECT * FROM lezioni WHERE id = $1', [id]);
-    if (!curRes.rows.length) return res.status(404).json({ error: 'Lezione non trovata' });
+    if (curRes.rows.length === 0) return res.status(404).json({ error: 'Lezione non trovata' });
     const cur = curRes.rows[0];
 
-    if (req.user.ruolo !== 'admin') {
-      const myTeacherId = req.user.insegnanteId || await getMyTeacherId(pool, req.user.username);
-      if (String(myTeacherId) !== String(cur.id_insegnante)) {
-        return res.status(403).json({ error: 'Accesso non autorizzato' });
-      }
+    // admin ok; insegnante solo su se stesso
+    if (req.user.ruolo !== 'admin' && String(req.user.id) !== String(cur.id_insegnante)) {
+      return res.status(403).json({ error: 'Accesso non autorizzato' });
     }
 
     const update = await pool.query(`
@@ -565,6 +711,7 @@ app.patch('/api/lezioni/:id/rimanda', authenticateToken, async (req, res) => {
       WHERE id = $2
       RETURNING *
     `, [motivazione, id]);
+
     res.json(update.rows[0]);
   } catch (err) {
     console.error('PATCH rimanda errore:', err);
@@ -572,20 +719,18 @@ app.patch('/api/lezioni/:id/rimanda', authenticateToken, async (req, res) => {
   }
 });
 
-// PATCH annulla
+// ✅ PATCH: forza ANNULLA senza toccare data/ora/aula
 app.patch('/api/lezioni/:id/annulla', authenticateToken, async (req, res) => {
   const { id } = req.params;
   const { motivazione = '' } = req.body;
+
   try {
     const curRes = await pool.query('SELECT * FROM lezioni WHERE id = $1', [id]);
-    if (!curRes.rows.length) return res.status(404).json({ error: 'Lezione non trovata' });
+    if (curRes.rows.length === 0) return res.status(404).json({ error: 'Lezione non trovata' });
     const cur = curRes.rows[0];
 
-    if (req.user.ruolo !== 'admin') {
-      const myTeacherId = req.user.insegnanteId || await getMyTeacherId(pool, req.user.username);
-      if (String(myTeacherId) !== String(cur.id_insegnante)) {
-        return res.status(403).json({ error: 'Accesso non autorizzato' });
-      }
+    if (req.user.ruolo !== 'admin' && String(req.user.id) !== String(cur.id_insegnante)) {
+      return res.status(403).json({ error: 'Accesso non autorizzato' });
     }
 
     const update = await pool.query(`
@@ -596,6 +741,7 @@ app.patch('/api/lezioni/:id/annulla', authenticateToken, async (req, res) => {
       WHERE id = $2
       RETURNING *
     `, [motivazione, id]);
+
     res.json(update.rows[0]);
   } catch (err) {
     console.error('PATCH annulla errore:', err);
@@ -616,22 +762,23 @@ app.delete('/api/lezioni/:id', async (req, res) => {
   }
 });
 
-// Lezioni di un insegnante (protetto)
+// ✅ GET lezioni di un insegnante specifico
+
 app.get('/api/insegnanti/:id/lezioni', authenticateToken, async (req, res) => {
   const { id } = req.params;
+
+  if (req.user.id != id && req.user.ruolo !== 'admin') {
+    return res.status(403).json({ error: 'Accesso non autorizzato' });
+  }
+
   try {
-    if (req.user.ruolo !== 'admin') {
-      const myTeacherId = req.user.insegnanteId || await getMyTeacherId(pool, req.user.username);
-      if (String(myTeacherId) !== String(id)) {
-        return res.status(403).json({ error: 'Accesso non autorizzato' });
-      }
-    }
     const { rows } = await pool.query(`
       SELECT lezioni.*, allievi.nome AS nome_allievo, allievi.cognome AS cognome_allievo
       FROM lezioni
       LEFT JOIN allievi ON lezioni.id_allievo = allievi.id
       WHERE lezioni.id_insegnante = $1
     `, [id]);
+
     res.json(rows);
   } catch (err) {
     console.error('Errore nel recupero lezioni insegnante:', err);
@@ -641,6 +788,7 @@ app.get('/api/insegnanti/:id/lezioni', authenticateToken, async (req, res) => {
 
 app.get('/api/insegnanti/:id/allievi', async (req, res) => {
   const { id } = req.params;
+
   try {
     const { rows } = await pool.query(`
       SELECT a.id, a.nome, a.cognome
@@ -648,16 +796,24 @@ app.get('/api/insegnanti/:id/allievi', async (req, res) => {
       JOIN allievi_insegnanti ai ON a.id = ai.allievo_id
       WHERE ai.insegnante_id = $1
     `, [id]);
-    res.json(rows);
+
+    res.json(rows); // restituisce un array di allievi assegnati
   } catch (err) {
     console.error('Errore nel recupero allievi assegnati:', err);
     res.status(500).json({ error: 'Errore nel recupero allievi assegnati' });
   }
 });
 
-// ---------- AREA UTENTI ----------
+
+//////////////////////////
+// AREA UTENTI
+//////////////////////////
+
 app.get('/api/utenti', authenticateToken, async (req, res) => {
-  if (req.user.ruolo !== 'admin') return res.status(403).json({ message: 'Accesso negato' });
+  if (req.user.ruolo !== 'admin') {
+    return res.status(403).json({ message: 'Accesso negato' });
+  }
+
   try {
     const result = await pool.query('SELECT id, username, ruolo FROM utenti ORDER BY username');
     res.json(result.rows);
@@ -668,11 +824,16 @@ app.get('/api/utenti', authenticateToken, async (req, res) => {
 });
 
 app.post('/api/utenti', authenticateToken, async (req, res) => {
-  if (req.user.ruolo !== 'admin') return res.status(403).json({ message: 'Accesso negato' });
+  if (req.user.ruolo !== 'admin') {
+    return res.status(403).json({ message: 'Accesso negato' });
+  }
+
   const { username, password, ruolo } = req.body;
+
   if (!username || !password || !['admin', 'insegnante'].includes(ruolo)) {
     return res.status(400).json({ message: 'Dati non validi' });
   }
+
   try {
     const hashedPassword = await bcrypt.hash(password, 10);
     await pool.query(
@@ -681,6 +842,7 @@ app.post('/api/utenti', authenticateToken, async (req, res) => {
        ON CONFLICT (username) DO NOTHING`,
       [username, hashedPassword, ruolo]
     );
+
     res.json({ message: 'Utente creato con successo' });
   } catch (err) {
     console.error('Errore nella creazione utente:', err);
@@ -688,8 +850,11 @@ app.post('/api/utenti', authenticateToken, async (req, res) => {
   }
 });
 
+
+
 app.get('/api/setup-utenti', async (req, res) => {
   try {
+    // Crea tabella utenti se non esiste
     await pool.query(`
       CREATE TABLE IF NOT EXISTS utenti (
         id SERIAL PRIMARY KEY,
@@ -698,37 +863,15 @@ app.get('/api/setup-utenti', async (req, res) => {
         ruolo VARCHAR(20) CHECK (ruolo IN ('admin', 'insegnante')) NOT NULL
       );
     `);
-    const hashedAdminPassword = await bcrypt.hash('admin', 10);
-    await pool.query(
-      `INSERT INTO utenti (username, password, ruolo)
-       VALUES ($1, $2, $3)
-       ON CONFLICT (username) DO NOTHING`,
-      ['admin', hashedAdminPassword, 'admin']
-    );
-    const hashedSegreteria = await bcrypt.hash('amamusic', 10);
-    await pool.query(
-      `INSERT INTO utenti (username, password, ruolo)
-       VALUES ($1, $2, $3)
-       ON CONFLICT (username) DO NOTHING`,
-      ['segreteria', hashedSegreteria, 'admin']
-    );
-    const insegnanteResult = await pool.query(
-    
-    res.json({ message: 'Setup utenti completato con admin e insegnante' });
-  } catch (err) {
-    console.error('Errore nel setup utenti:', err);
-    res.status(500).json({ message: 'Errore nel setup utenti' });
-  }
-});
 
-// ---------- Endpoint "me" corretto (by username) ----------
+
 app.get('/api/insegnante/me', authenticateToken, async (req, res) => {
   try {
     const { rows } = await pool.query(
-      `SELECT id, nome, cognome, username, avatar_url FROM insegnanti WHERE username = $1 LIMIT 1`,
-      [req.user.username]
+      'SELECT id, nome, cognome, username, avatar_url FROM insegnanti WHERE id = $1',
+      [req.user.id]
     );
-    if (!rows.length) return res.status(404).json({ message: 'Utente non trovato' });
+    if (rows.length === 0) return res.status(404).json({ message: 'Utente non trovato' });
     res.json(rows[0]);
   } catch (err) {
     console.error('Errore caricamento dati utente:', err);
@@ -736,11 +879,16 @@ app.get('/api/insegnante/me', authenticateToken, async (req, res) => {
   }
 });
 
-// ---------- ALLIEVI ----------
+//////////////////////////
+// ALLIEVI
+//////////////////////////
+
+// GET tutti gli allievi
 app.get('/api/allievi', authenticateToken, async (req, res) => {
   if (req.user.ruolo !== 'admin' && req.user.ruolo !== 'insegnante') {
     return res.status(403).json({ message: 'Accesso negato' });
   }
+
   try {
     const { rows } = await pool.query('SELECT * FROM allievi ORDER BY cognome, nome');
     res.json(rows);
@@ -750,11 +898,15 @@ app.get('/api/allievi', authenticateToken, async (req, res) => {
   }
 });
 
+
+// GET un allievo per ID
 app.get('/api/allievi/:id', authenticateToken, async (req, res) => {
   const { id } = req.params;
+
   if (req.user.ruolo !== 'admin' && req.user.ruolo !== 'insegnante') {
     return res.status(403).json({ message: 'Accesso negato' });
   }
+
   try {
     const { rows } = await pool.query('SELECT * FROM allievi WHERE id = $1', [id]);
     if (rows.length === 0) return res.status(404).json({ error: 'Allievo non trovato' });
@@ -764,54 +916,68 @@ app.get('/api/allievi/:id', authenticateToken, async (req, res) => {
   }
 });
 
+
+// POST nuovo allievo
 app.post('/api/allievi', authenticateToken, async (req, res) => {
   if (req.user.ruolo !== 'admin') {
     return res.status(403).json({ message: 'Accesso negato' });
   }
+
+  const {
+    nome,
+    cognome,
+    email = '',
+    telefono = '',
+    note = '',
+    data_iscrizione = new Date().toISOString().split('T')[0],
+    quota_mensile = 0
+  } = req.body;
+
   try {
-    let {
-      nome, cognome, email, telefono, note, data_iscrizione, quota_mensile,
-    } = req.body;
-
-    if (!nome || !cognome) {
-      return res.status(400).json({ error: 'Nome e cognome sono obbligatori' });
-    }
-    email = (email ?? '').trim();
-    telefono = (telefono ?? '').trim();
-    note = (note ?? '').trim();
-    const today = new Date().toISOString().slice(0, 10);
-    data_iscrizione = (data_iscrizione && String(data_iscrizione).slice(0,10)) || today;
-    const qm = Number(String(quota_mensile ?? '').replace(',', '.'));
-    quota_mensile = Number.isFinite(qm) ? qm : 0;
-
     const { rows } = await pool.query(
-      `INSERT INTO allievi (nome, cognome, email, telefono, note, data_iscrizione, quota_mensile)
-       VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
+      `INSERT INTO allievi (
+        nome, cognome, email, telefono, note, data_iscrizione, quota_mensile
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
       [nome, cognome, email, telefono, note, data_iscrizione, quota_mensile]
     );
     res.status(201).json(rows[0]);
   } catch (err) {
     console.error('Errore nella creazione allievo:', err);
-    res.status(500).json({ error: 'Errore nella creazione allievo', detail: err?.detail || err?.message });
+    res.status(500).json({ error: 'Errore nella creazione allievo' });
   }
 });
 
+
+// PUT modifica allievo
 app.put('/api/allievi/:id', authenticateToken, async (req, res) => {
   if (req.user.ruolo !== 'admin') {
     return res.status(403).json({ message: 'Accesso negato' });
   }
+
   const { id } = req.params;
+  const {
+    nome,
+    cognome,
+    email = '',
+    telefono = '',
+    note = '',
+    quota_mensile = 0
+  } = req.body;
+
   try {
-    let { nome, cognome, email = '', telefono = '', note = '', quota_mensile = 0 } = req.body;
-    const qm = Number(String(quota_mensile ?? '').replace(',', '.'));
-    quota_mensile = Number.isFinite(qm) ? qm : 0;
     const { rows } = await pool.query(
       `UPDATE allievi SET
-        nome = $1, cognome = $2, email = $3, telefono = $4, note = $5, quota_mensile = $6
+        nome = $1,
+        cognome = $2,
+        email = $3,
+        telefono = $4,
+        note = $5,
+        quota_mensile = $6
        WHERE id = $7 RETURNING *`,
       [nome, cognome, email, telefono, note, quota_mensile, id]
     );
-    if (!rows.length) return res.status(404).json({ error: 'Allievo non trovato' });
+
+    if (rows.length === 0) return res.status(404).json({ error: 'Allievo non trovato' });
     res.json(rows[0]);
   } catch (err) {
     console.error('Errore nell\'aggiornamento allievo:', err);
@@ -819,10 +985,13 @@ app.put('/api/allievi/:id', authenticateToken, async (req, res) => {
   }
 });
 
+
+// DELETE allievo
 app.delete('/api/allievi/:id', authenticateToken, async (req, res) => {
   if (req.user.ruolo !== 'admin') {
     return res.status(403).json({ message: 'Accesso negato' });
   }
+
   const { id } = req.params;
   try {
     const { rowCount } = await pool.query('DELETE FROM allievi WHERE id = $1', [id]);
@@ -834,14 +1003,22 @@ app.delete('/api/allievi/:id', authenticateToken, async (req, res) => {
   }
 });
 
+
+// PATCH stato attivo/inattivo
 app.patch('/api/allievi/:id/stato', authenticateToken, async (req, res) => {
   if (req.user.ruolo !== 'admin') {
     return res.status(403).json({ message: 'Accesso negato' });
   }
+
   const { id } = req.params;
   const { attivo } = req.body;
+
   try {
-    const { rowCount } = await pool.query('UPDATE allievi SET attivo = $1 WHERE id = $2', [attivo, id]);
+    const { rowCount } = await pool.query(
+      'UPDATE allievi SET attivo = $1 WHERE id = $2',
+      [attivo, id]
+    );
+
     if (rowCount === 0) return res.status(404).json({ error: 'Allievo non trovato' });
     res.status(204).send();
   } catch (err) {
@@ -850,7 +1027,10 @@ app.patch('/api/allievi/:id/stato', authenticateToken, async (req, res) => {
   }
 });
 
-// ---------- PAGAMENTI ----------
+////////////////////////
+// GESTIONE PAGAMENTI
+////////////////////////
+
 app.get('/api/init-pagamenti', async (req, res) => {
   try {
     await pool.query(`
@@ -918,7 +1098,7 @@ app.delete('/api/allievi/:id/pagamenti', async (req, res) => {
   }
 });
 
-// ---------- RELAZIONI ----------
+
 app.get('/api/init-relazioni', async (req, res) => {
   try {
     await pool.query(`
@@ -945,6 +1125,7 @@ app.get('/api/debug-utenti', async (req, res) => {
   }
 });
 
+// ⬇️ aggiungi vicino agli altri endpoint di setup
 app.get('/api/setup-lezioni-history', async (req, res) => {
   try {
     await pool.query(`
@@ -968,7 +1149,11 @@ app.get('/api/init-lezioni-history1', async (_req, res) => {
   }
 });
 
-// ---------- QUOTE ASSOCIATIVE ----------
+// ===============================
+// QUOTE ASSOCIATIVE ANNUALI
+// ===============================
+
+// INIT tabella
 app.get('/api/init-quote-associative', async (_req, res) => {
   try {
     await pool.query(`
@@ -988,6 +1173,7 @@ app.get('/api/init-quote-associative', async (_req, res) => {
   }
 });
 
+// GET tutte le quote associative di un allievo (storico)
 app.get('/api/allievi/:id/quote-associative', authenticateToken, async (req, res) => {
   if (req.user.ruolo !== 'admin' && req.user.ruolo !== 'insegnante') {
     return res.status(403).json({ message: 'Accesso negato' });
@@ -995,7 +1181,10 @@ app.get('/api/allievi/:id/quote-associative', authenticateToken, async (req, res
   const { id } = req.params;
   try {
     const { rows } = await pool.query(
-      `SELECT anno, pagata, data_pagamento FROM quote_associative WHERE allievo_id = $1 ORDER BY anno DESC`,
+      `SELECT anno, pagata, data_pagamento
+       FROM quote_associative
+       WHERE allievo_id = $1
+       ORDER BY anno DESC`,
       [id]
     );
     res.json(rows);
@@ -1005,20 +1194,29 @@ app.get('/api/allievi/:id/quote-associative', authenticateToken, async (req, res
   }
 });
 
+// UPSERT stato quota associativa (admin)
 app.post('/api/allievi/:id/quota-associativa', authenticateToken, async (req, res) => {
-  if (req.user.ruolo !== 'admin') return res.status(403).json({ message: 'Accesso negato' });
+  if (req.user.ruolo !== 'admin') {
+    return res.status(403).json({ message: 'Accesso negato' });
+  }
   const { id } = req.params;
-  const { anno, pagata } = req.body;
-  if (!anno || !Number.isInteger(anno)) return res.status(400).json({ error: 'Anno non valido' });
+  const { anno, pagata } = req.body; // pagata: true/false
+
+  if (!anno || !Number.isInteger(anno)) {
+    return res.status(400).json({ error: 'Anno non valido' });
+  }
+
   try {
     const { rows } = await pool.query(
-      `INSERT INTO quote_associative (allievo_id, anno, pagata, data_pagamento)
-       VALUES ($1, $2, $3, CASE WHEN $3 THEN CURRENT_DATE ELSE NULL END)
-       ON CONFLICT (allievo_id, anno)
-       DO UPDATE SET
-         pagata = EXCLUDED.pagata,
-         data_pagamento = CASE WHEN EXCLUDED.pagata THEN CURRENT_DATE ELSE NULL END
-       RETURNING anno, pagata, data_pagamento`,
+      `
+      INSERT INTO quote_associative (allievo_id, anno, pagata, data_pagamento)
+      VALUES ($1, $2, $3, CASE WHEN $3 THEN CURRENT_DATE ELSE NULL END)
+      ON CONFLICT (allievo_id, anno)
+      DO UPDATE SET
+        pagata = EXCLUDED.pagata,
+        data_pagamento = CASE WHEN EXCLUDED.pagata THEN CURRENT_DATE ELSE NULL END
+      RETURNING anno, pagata, data_pagamento
+      `,
       [id, anno, !!pagata]
     );
     res.json(rows[0]);
@@ -1028,11 +1226,15 @@ app.post('/api/allievi/:id/quota-associativa', authenticateToken, async (req, re
   }
 });
 
+// DELETE (rimuovi record quota associativa per anno) — opzionale
 app.delete('/api/allievi/:id/quota-associativa', authenticateToken, async (req, res) => {
-  if (req.user.ruolo !== 'admin') return res.status(403).json({ message: 'Accesso negato' });
+  if (req.user.ruolo !== 'admin') {
+    return res.status(403).json({ message: 'Accesso negato' });
+  }
   const { id } = req.params;
   const { anno } = req.query;
   if (!anno) return res.status(400).json({ error: 'Anno mancante' });
+
   try {
     const result = await pool.query(
       `DELETE FROM quote_associative WHERE allievo_id = $1 AND anno = $2`,
@@ -1045,7 +1247,11 @@ app.delete('/api/allievi/:id/quota-associativa', authenticateToken, async (req, 
   }
 });
 
-// ---------- AULE ----------
+// ======================
+//      AULE (CRUD)
+// ======================
+
+// GET /api/aule  → lista aule
 app.get('/api/aule', authenticateToken, async (req, res) => {
   if (req.user.ruolo !== 'admin') return res.status(403).json({ message: 'Accesso negato' });
   try {
@@ -1057,10 +1263,15 @@ app.get('/api/aule', authenticateToken, async (req, res) => {
   }
 });
 
+// POST /api/aule  → crea aula
 app.post('/api/aule', authenticateToken, async (req, res) => {
   if (req.user.ruolo !== 'admin') return res.status(403).json({ message: 'Accesso negato' });
+
   const { nome } = req.body;
-  if (!nome || !String(nome).trim()) return res.status(400).json({ error: 'Nome aula obbligatorio' });
+  if (!nome || !String(nome).trim()) {
+    return res.status(400).json({ error: 'Nome aula obbligatorio' });
+  }
+
   try {
     const { rows } = await pool.query(
       `INSERT INTO aule (nome) VALUES ($1) RETURNING id, nome`,
@@ -1076,17 +1287,27 @@ app.post('/api/aule', authenticateToken, async (req, res) => {
   }
 });
 
+// PUT /api/aule/:id  → rinomina aula
 app.put('/api/aule/:id', authenticateToken, async (req, res) => {
   if (req.user.ruolo !== 'admin') return res.status(403).json({ message: 'Accesso negato' });
+
   const { id } = req.params;
   const { nome } = req.body;
-  if (!nome || !String(nome).trim()) return res.status(400).json({ error: 'Nome aula obbligatorio' });
+
+  if (!nome || !String(nome).trim()) {
+    return res.status(400).json({ error: 'Nome aula obbligatorio' });
+  }
+
   try {
     const { rows } = await pool.query(
       `UPDATE aule SET nome = $1 WHERE id = $2 RETURNING id, nome`,
       [String(nome).trim(), id]
     );
-    if (!rows.length) return res.status(404).json({ error: 'Aula non trovata' });
+    if (rows.length === 0) return res.status(404).json({ error: 'Aula non trovata' });
+
+    // ⚠️ Opzionale: se vuoi riflettere il cambio anche sulle lezioni esistenti:
+    // await pool.query(`UPDATE lezioni SET aula = $1 WHERE aula = $2`, [String(nome).trim(), oldNome]);
+
     res.json(rows[0]);
   } catch (err) {
     if (String(err?.message || '').includes('duplicate')) {
@@ -1097,10 +1318,16 @@ app.put('/api/aule/:id', authenticateToken, async (req, res) => {
   }
 });
 
+// DELETE /api/aule/:id  → elimina aula
 app.delete('/api/aule/:id', authenticateToken, async (req, res) => {
   if (req.user.ruolo !== 'admin') return res.status(403).json({ message: 'Accesso negato' });
+
   const { id } = req.params;
   try {
+    // Se vuoi impedire l’eliminazione se esistono lezioni che usano quest’aula:
+    // const inUse = await pool.query(`SELECT 1 FROM lezioni WHERE aula = (SELECT nome FROM aule WHERE id=$1) LIMIT 1`, [id]);
+    // if (inUse.rows.length) return res.status(409).json({ error: 'Aula utilizzata in alcune lezioni: non eliminabile' });
+
     const { rowCount } = await pool.query(`DELETE FROM aule WHERE id = $1`, [id]);
     if (rowCount === 0) return res.status(404).json({ error: 'Aula non trovata' });
     res.json({ message: 'Aula eliminata' });
@@ -1110,6 +1337,8 @@ app.delete('/api/aule/:id', authenticateToken, async (req, res) => {
   }
 });
 
+
+// 🔧 Setup tabella AULE + import opzionale da lezioni
 app.get('/api/setup-aule', async (_req, res) => {
   try {
     await pool.query(`
@@ -1118,6 +1347,8 @@ app.get('/api/setup-aule', async (_req, res) => {
         nome TEXT UNIQUE NOT NULL
       );
     `);
+
+    // opzionale: importa le aule distinte già presenti nelle lezioni
     await pool.query(`
       INSERT INTO aule (nome)
       SELECT DISTINCT TRIM(aula) AS nome
@@ -1125,6 +1356,7 @@ app.get('/api/setup-aule', async (_req, res) => {
       WHERE aula IS NOT NULL AND TRIM(aula) <> ''
       ON CONFLICT (nome) DO NOTHING;
     `);
+
     res.json({ message: '✅ Tabella aule pronta (e popolata dai valori presenti in lezioni, se ce n’erano).' });
   } catch (err) {
     console.error('Errore setup aule:', err);
@@ -1132,96 +1364,13 @@ app.get('/api/setup-aule', async (_req, res) => {
   }
 });
 
-// ---------- RESET & ALIGN (preserva segreteria/direzione) ----------
-app.get('/api/reset-clean', async (req, res) => {
-  const { token, cleanUploads } = req.query;
-  const PRESERVE_USERS = ['segreteria', 'direzione'];
-  try {
-    const isProd = process.env.NODE_ENV === 'production';
-    if (isProd && process.env.ALLOW_RESET_IN_PROD !== 'true') {
-      return res.status(403).json({ error: 'Operazione non permessa in produzione (serve ALLOW_RESET_IN_PROD=true)' });
-    }
-    if (!process.env.RESET_TOKEN) return res.status(500).json({ error: 'RESET_TOKEN non configurato' });
-    if (token !== process.env.RESET_TOKEN) return res.status(401).json({ error: 'Token non valido' });
 
-    const client = await pool.connect();
-    try {
-      await client.query('BEGIN');
 
-      const preservedRes = await client.query(
-        `SELECT id, username, ruolo FROM utenti WHERE username = ANY($1)`,
-        [PRESERVE_USERS]
-      );
-      const preserved = preservedRes.rows;
+//////////////////////////
+// AVVIO SERVER
+//////////////////////////
 
-      const deleteRes = await client.query(
-        `DELETE FROM utenti WHERE username NOT IN ($1, $2) RETURNING id, username`,
-        PRESERVE_USERS
-      );
-      const deletedUsers = deleteRes.rows || [];
-
-      await client.query(`
-        TRUNCATE TABLE
-          pagamenti_mensili,
-          allievi_insegnanti,
-          lezioni,
-          quote_associative,
-          aule,
-          allievi,
-          insegnanti
-        RESTART IDENTITY CASCADE
-      `);
-
-      await client.query(`
-        SELECT setval(
-          pg_get_serial_sequence('utenti','id'),
-          COALESCE((SELECT MAX(id) FROM utenti), 0) + 1,
-          false
-        )
-      `);
-
-      await client.query('COMMIT');
-
-      let uploadsDeleted = 0;
-      if (String(cleanUploads).toLowerCase() === 'true') {
-        try {
-          const uploadsDir = path.join(__dirname, 'uploads');
-          if (fs.existsSync(uploadsDir)) {
-            const files = fs.readdirSync(uploadsDir);
-            for (const f of files) {
-              const p = path.join(uploadsDir, f);
-              const stat = fs.statSync(p);
-              if (stat.isFile()) { fs.unlinkSync(p); uploadsDeleted++; }
-            }
-          }
-        } catch (e) {
-          console.warn('Pulizia uploads fallita (non bloccante):', e.message);
-        }
-      }
-
-      return res.json({
-        ok: true,
-        message: 'Reset & alignment eseguiti (account admin preservati).',
-        preserved,
-        deletedUsersCount: deletedUsers.length,
-        deletedUsers,
-        uploadsDeleted,
-        note: 'Gli ID ripartono da 1. Account segreteria e direzione conservati.'
-      });
-    } catch (e) {
-      await client.query('ROLLBACK');
-      console.error('Errore durante reset-clean transaction:', e);
-      return res.status(500).json({ error: 'Errore durante reset-clean', details: String(e) });
-    } finally {
-      client.release();
-    }
-  } catch (err) {
-    console.error('Errore /api/reset-clean:', err);
-    return res.status(500).json({ error: 'Errore imprevisto' });
-  }
-});
-
-// ---------- AVVIO SERVER ----------
 app.listen(PORT, () => {
   console.log(`Server in ascolto sulla porta ${PORT}`);
 });
+
