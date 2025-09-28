@@ -13,6 +13,18 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const JWT_SECRET = process.env.JWT_SECRET || 'supersegreto';
 
+// --- helper: genera username normalizzato "iniziale.cognome" (minuscolo, senza spazi/accents) ---
+function genUsernameFrom(nome, cognome) {
+  const norm = (s) => String(s || '')
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '') // rimuove accenti
+    .replace(/['’`]/g, '')                            // apostrofi
+    .toLowerCase().trim();
+  const n = norm(nome);
+  const c = norm(cognome).replace(/\s+/g, '');        // elimina spazi nel cognome composto
+  const initial = n ? n[0] : '';
+  return `${initial}.${c}`;
+}
+
 // CORS
 app.use(cors({
   origin: ["https://accademia-frontend.vercel.app"],
@@ -131,20 +143,46 @@ app.post('/api/cambia-password', async (req, res) => {
 app.post('/api/insegnanti', async (req, res) => {
   const { nome, cognome } = req.body;
   try {
-    const username = `${nome[0].toLowerCase()}.${cognome.toLowerCase()}`;
+    if (!nome || !cognome) {
+      return res.status(400).json({ error: 'Nome e cognome sono obbligatori' });
+    }
+
+    // 1) username base normalizzato
+    const base = genUsernameFrom(nome, cognome);
+
+    // 2) risolvi duplicati (case-insensitive)
+    let username = base;
+    let suffix = 1;
+    // controlla collisioni su entrambe le tabelle
+    const existsUsername = async (u) => {
+      const q1 = await pool.query(`SELECT 1 FROM insegnanti WHERE LOWER(username)=LOWER($1) LIMIT 1`, [u]);
+      const q2 = await pool.query(`SELECT 1 FROM utenti WHERE LOWER(username)=LOWER($1) LIMIT 1`, [u]);
+      return !!(q1.rows.length || q2.rows.length);
+    };
+    while (await existsUsername(username)) {
+      suffix += 1;
+      username = `${base}${suffix}`; // es: a.rossi2, a.rossi3...
+    }
+
+    // 3) password iniziale
     const password = 'amamusic';
     const password_hash = await bcrypt.hash(password, 10);
 
+    // 4) inserisci insegnante
     const { rows } = await pool.query(
-      'INSERT INTO insegnanti (nome, cognome, username, password_hash) VALUES ($1, $2, $3, $4) RETURNING *',
+      `INSERT INTO insegnanti (nome, cognome, username, password_hash)
+       VALUES ($1, $2, $3, $4) RETURNING *`,
       [nome, cognome, username, password_hash]
     );
+
+    // 5) inserisci utente gemello
     await pool.query(
       `INSERT INTO utenti (username, password, ruolo)
-       VALUES ($1, $2, $3)
+       VALUES ($1, $2, 'insegnante')
        ON CONFLICT (username) DO NOTHING`,
-      [username, password_hash, 'insegnante']
+      [username, password_hash]
     );
+
     res.status(201).json({ ...rows[0], password_iniziale: password });
   } catch (err) {
     console.error('Errore creazione insegnante:', err);
@@ -1221,29 +1259,156 @@ app.get('/api/reset-clean', async (req, res) => {
   }
 });
 
-// ⚠️ solo uso temporaneo
-app.get('/api/fix-insegnanti-utenti', async (req, res) => {
-  try {
-    const insegnanti = await pool.query(`SELECT username, password_hash FROM insegnanti`);
-    let creati = 0;
+/**
+ * Allineamento insegnanti <-> utenti
+ * GET /api/admin/align-insegnanti-utenti?apply=true|false&normalize=true|false
+ *  - Se apply=false (default) fa solo DRY RUN e restituisce il piano cambi
+ *  - Se apply=true applica le modifiche in TRANSAZIONE
+ *  - Se normalize=true riscrive anche insegnanti.username con lo schema "i.cognome" (minuscolo, no spazi/accents)
+ *    e allinea/crea utenti di conseguenza
+ *  - Se normalize=false preserva insegnanti.username così com’è e crea/aggiorna utenti di conseguenza
+ */
+app.get('/api/admin/align-insegnanti-utenti', authenticateToken, async (req, res) => {
+  if (req.user.ruolo !== 'admin') return res.status(403).json({ error: 'Accesso negato' });
 
-    for (const ins of insegnanti.rows) {
-      if (!ins.username || !ins.password_hash) continue;
-      await pool.query(
-        `INSERT INTO utenti (username, password, ruolo)
-         VALUES ($1, $2, 'insegnante')
-         ON CONFLICT (username) DO NOTHING`,
-        [ins.username, ins.password_hash]
-      );
-      creati++;
+  const apply = String(req.query.apply || 'false').toLowerCase() === 'true';
+  const normalize = String(req.query.normalize || 'false').toLowerCase() === 'true';
+
+  try {
+    const { rows: ins } = await pool.query(
+      `SELECT id, nome, cognome, username, password_hash FROM insegnanti ORDER BY id`
+    );
+
+    // Prepara piano modifiche + controllo conflitti username (post-normalizzazione)
+    const plan = [];
+    const usernameCount = new Map(); // per rilevare conflitti se normalize=true
+
+    for (const i of ins) {
+      const targetUsername = normalize
+        ? genUsernameFrom(i.nome, i.cognome)
+        : String(i.username || '').trim();
+
+      // contatore per conflitti (solo quando normalizzi)
+      if (normalize) {
+        usernameCount.set(targetUsername, (usernameCount.get(targetUsername) || 0) + 1);
+      }
+
+      const needUpdateTeacherUsername = normalize && targetUsername && targetUsername !== i.username;
+      const needDefaultPwd = !i.password_hash; // se manca l’hash metteremo 'amamusic'
+      plan.push({
+        insegnanteId: i.id,
+        nome: i.nome,
+        cognome: i.cognome,
+        oldUsername: i.username || null,
+        newUsername: targetUsername || null,
+        updateTeacherUsername: !!needUpdateTeacherUsername,
+        ensureUser: true,
+        setDefaultPwdIfMissing: !!needDefaultPwd
+      });
     }
 
-    res.json({ message: `Allineamento completato`, utentiInseriti: creati });
+    // Conflitti: stesso username per più docenti
+    const conflicts = [];
+    if (normalize) {
+      for (const [u, cnt] of usernameCount.entries()) {
+        if (cnt > 1) conflicts.push({ username: u, count: cnt });
+      }
+    }
+
+    if (conflicts.length && apply) {
+      return res.status(409).json({
+        error: 'Conflitti username dopo normalizzazione: risolvi prima',
+        conflicts
+      });
+    }
+
+    if (!apply) {
+      return res.json({
+        dryRun: true,
+        normalize,
+        conflicts,
+        plan
+      });
+    }
+
+    // APPLY
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      for (const step of plan) {
+        let usernameToUse = step.newUsername;
+
+        // Se preservo e non ho username valido, salto (o potrei generarlo di fallback)
+        if (!usernameToUse) {
+          // fallback: se normalize=false ma insegnante.username è vuoto, genero per non lasciare buchi
+          usernameToUse = genUsernameFrom(step.nome, step.cognome);
+          await client.query(
+            `UPDATE insegnanti SET username = $1 WHERE id = $2`,
+            [usernameToUse, step.insegnanteId]
+          );
+        } else if (step.updateTeacherUsername) {
+          // Aggiorno username insegnante solo se richiesto (normalize=true)
+          await client.query(
+            `UPDATE insegnanti SET username = $1 WHERE id = $2`,
+            [usernameToUse, step.insegnanteId]
+          );
+        }
+
+        // Se manca l’hash password, imposto default 'amamusic'
+        let pwdHash = null;
+        if (step.setDefaultPwdIfMissing) {
+          const salt = await bcrypt.genSalt(10);
+          pwdHash = await bcrypt.hash('amamusic', salt);
+          await client.query(
+            `UPDATE insegnanti SET password_hash = $1 WHERE id = $2`,
+            [pwdHash, step.insegnanteId]
+          );
+        } else {
+          // recupero l’hash aggiornato (o esistente)
+          const { rows } = await client.query(
+            `SELECT password_hash FROM insegnanti WHERE id = $1`,
+            [step.insegnanteId]
+          );
+          pwdHash = rows[0]?.password_hash || null;
+          if (!pwdHash) {
+            // estremo fallback
+            const salt = await bcrypt.genSalt(10);
+            pwdHash = await bcrypt.hash('amamusic', salt);
+            await client.query(
+              `UPDATE insegnanti SET password_hash = $1 WHERE id = $2`,
+              [pwdHash, step.insegnanteId]
+            );
+          }
+        }
+
+        // Upsert utente corrispondente (ruolo insegnante)
+        await client.query(
+          `INSERT INTO utenti (username, password, ruolo)
+           VALUES ($1, $2, 'insegnante')
+           ON CONFLICT (username) DO UPDATE SET
+             password = EXCLUDED.password,
+             ruolo = 'insegnante'`,
+          [usernameToUse, pwdHash]
+        );
+      }
+
+      await client.query('COMMIT');
+      res.json({ ok: true, normalize, conflicts, applied: plan.length });
+    } catch (e) {
+      await client.query('ROLLBACK');
+      console.error('ALIGN TX error:', e);
+      res.status(500).json({ error: 'Errore durante l’allineamento', details: String(e) });
+    } finally {
+      client.release();
+    }
   } catch (err) {
-    console.error('Errore fix insegnanti->utenti:', err);
-    res.status(500).json({ error: 'Errore durante il fix' });
+    console.error('ALIGN error:', err);
+    res.status(500).json({ error: 'Errore server' });
   }
 });
+
+
 
 // ---------- AVVIO SERVER ----------
 app.listen(PORT, () => {
