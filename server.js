@@ -712,7 +712,7 @@ app.get('/api/setup-utenti', async (req, res) => {
        ON CONFLICT (username) DO NOTHING`,
       ['segreteria', hashedSegreteria, 'admin']
     );
-    const insegnanteResult = await pool.query(
+
     
     res.json({ message: 'Setup utenti completato con admin e insegnante' });
   } catch (err) {
