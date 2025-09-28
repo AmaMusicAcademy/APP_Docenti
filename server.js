@@ -101,7 +101,7 @@ app.post('/api/login', async (req, res) => {
 
     if (!match) return res.status(401).json({ message: 'Credenziali non valide' });
 
-    const token = jwt.sign({ id: user.id, username: user.username, ruolo: user.ruolo }, JWT_SECRET, { expiresIn: '12h' });
+    const token = jwt.sign({ id: user.id, username: user.username, ruolo: user.ruolo }, JWT_SECRET);
 
     res.json({
       message: 'Login riuscito',
