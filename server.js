@@ -1290,7 +1290,9 @@ app.delete('/api/allievi/:id/quota-associativa', authenticateToken, async (req, 
 // AULE (CRUD + setup)
 // ----------------------
 app.get('/api/aule', authenticateToken, async (req, res) => {
-  if (req.user.ruolo !== 'admin') return res.status(403).json({ message: 'Accesso negato' });
+  if (req.user.ruolo !== 'admin' && req.user.ruolo !== 'insegnante') {
+    return res.status(403).json({ message: 'Accesso negato' });
+  }
   try {
     const { rows } = await pool.query('SELECT id, nome FROM aule ORDER BY nome ASC');
     res.json(rows);
