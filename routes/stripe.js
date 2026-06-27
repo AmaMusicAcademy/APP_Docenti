@@ -126,11 +126,12 @@ router.post('/stripe/payment-intent', ...requireRole('allievo'), async (req, res
     const desc   = mesi.map(m => `${MESI_NOME[m.mese]} ${m.anno}`).join(', ');
 
     const intent = await stripe.paymentIntents.create({
-      amount:      totale,
-      currency:    'eur',
-      customer:    customerId,
-      description: `Quote mensili: ${desc}`,
-      metadata:    {
+      amount:               totale,
+      currency:             'eur',
+      customer:             customerId,
+      payment_method_types: ['card'],
+      description:          `Quote mensili: ${desc}`,
+      metadata:             {
         allievo_id: String(req.user.allievoId),
         mesi:       JSON.stringify(mesi.map(m => ({ anno: m.anno, mese: m.mese }))),
       },
