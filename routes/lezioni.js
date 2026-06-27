@@ -1,6 +1,33 @@
 const express = require('express');
 const { pool } = require('../db');
 const { authenticateToken } = require('../Middleware/auth');
+const webpush = require('web-push');
+
+webpush.setVapidDetails(
+  'mailto:admin@accademiamusica.it',
+  process.env.VAPID_PUBLIC_KEY  || 'BMgEDEnpAym0uU7vHTkp-2L4cCiQDNAFd4xHoaFyoFez8oOoA_07yjdiBoijawwx0IN2Y5Cd8Nn64qPD7wm33Mk',
+  process.env.VAPID_PRIVATE_KEY || 'l85YTsJL_zNYuDmONQE5P7jjOexKrzwu3A6_lIaLMfE'
+);
+
+async function inviaPush(allievoId, titolo, corpo) {
+  try {
+    const { rows } = await pool.query(
+      'SELECT endpoint, keys FROM push_subscriptions WHERE allievo_id=$1', [allievoId]
+    );
+    for (const sub of rows) {
+      try {
+        await webpush.sendNotification(
+          { endpoint: sub.endpoint, keys: sub.keys },
+          JSON.stringify({ title: titolo, body: corpo })
+        );
+      } catch (e) {
+        if (e.statusCode === 410) {
+          await pool.query('DELETE FROM push_subscriptions WHERE endpoint=$1', [sub.endpoint]);
+        }
+      }
+    }
+  } catch {}
+}
 
 const router = express.Router();
 
@@ -19,6 +46,11 @@ const parseHistory = (v) => {
   return [];
 };
 
+const TITOLI_PUSH = {
+  lezione_annullata: '❌ Lezione annullata',
+  lezione_rimandato: '🔄 Lezione spostata',
+};
+
 async function creaNotificaLezione(id_allievo, tipo, messaggio) {
   try {
     await pool.query(
@@ -26,6 +58,9 @@ async function creaNotificaLezione(id_allievo, tipo, messaggio) {
        VALUES ($1, $2, $3)`,
       [id_allievo, tipo, messaggio]
     );
+    // Push contestuale
+    const titolo = TITOLI_PUSH[tipo] || '📚 Accademia Musicale';
+    await inviaPush(id_allievo, titolo, messaggio);
   } catch (err) {
     console.error('Errore creazione notifica:', err);
   }
