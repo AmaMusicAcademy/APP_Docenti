@@ -142,11 +142,35 @@ router.get('/allievo/pagamenti', ...requireRole('allievo'), async (req, res) => 
     }
 
     mesi.reverse(); // più recente prima
-    res.json({ quota_mensile, pagamenti: mesi });
+
+    // Stato abbonamento Stripe
+    const { rows: subRow } = await pool.query(
+      'SELECT stripe_subscription_id FROM allievi WHERE id=$1', [id]
+    );
+    const abbonamentoAttivo = !!(subRow[0]?.stripe_subscription_id);
+
+    res.json({ quota_mensile, pagamenti: mesi, abbonamentoAttivo });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Errore nel recupero pagamenti' });
   }
+});
+
+// POST /api/allievo/conferma-pagamento — marca mesi come pagati subito dopo Stripe (backup webhook)
+router.post('/allievo/conferma-pagamento', ...requireRole('allievo'), async (req, res) => {
+  const { mesi = [] } = req.body;
+  const id = req.user.allievoId;
+  try {
+    for (const { anno, mese } of mesi) {
+      await pool.query(
+        `INSERT INTO pagamenti_mensili (allievo_id, anno, mese, data_pagamento)
+         VALUES ($1, $2, $3, NOW())
+         ON CONFLICT DO NOTHING`,
+        [id, anno, mese]
+      );
+    }
+    res.json({ ok: true });
+  } catch (err) { console.error(err); res.status(500).json({ error: 'Errore' }); }
 });
 
 // GET /api/allievo/notifiche
