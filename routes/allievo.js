@@ -1,6 +1,33 @@
 const express = require('express');
 const { pool } = require('../db');
 const { requireRole } = require('../Middleware/auth');
+const webpush = require('web-push');
+
+webpush.setVapidDetails(
+  'mailto:admin@accademiamusica.it',
+  process.env.VAPID_PUBLIC_KEY  || 'BMgEDEnpAym0uU7vHTkp-2L4cCiQDNAFd4xHoaFyoFez8oOoA_07yjdiBoijawwx0IN2Y5Cd8Nn64qPD7wm33Mk',
+  process.env.VAPID_PRIVATE_KEY || 'l85YTsJL_zNYuDmONQE5P7jjOexKrzwu3A6_lIaLMfE'
+);
+
+async function inviaPushAllievo(allievoId, titolo, corpo) {
+  try {
+    const { rows } = await pool.query(
+      'SELECT endpoint, keys FROM push_subscriptions WHERE allievo_id=$1', [allievoId]
+    );
+    for (const sub of rows) {
+      try {
+        await webpush.sendNotification(
+          { endpoint: sub.endpoint, keys: sub.keys },
+          JSON.stringify({ title: titolo, body: corpo })
+        );
+      } catch (e) {
+        if (e.statusCode === 410) {
+          await pool.query('DELETE FROM push_subscriptions WHERE endpoint=$1', [sub.endpoint]);
+        }
+      }
+    }
+  } catch {}
+}
 
 const router = express.Router();
 
@@ -304,8 +331,18 @@ router.post('/allievo/push-subscribe', ...requireRole('allievo'), async (req, re
        ON CONFLICT (allievo_id, endpoint) DO UPDATE SET keys = $3`,
       [req.user.allievoId, endpoint, JSON.stringify(keys)]
     );
+    // Push di conferma iscrizione
+    await inviaPushAllievo(req.user.allievoId, '🔔 Notifiche attive', 'Riceverai aggiornamenti su pagamenti e lezioni direttamente qui.');
     res.json({ ok: true });
   } catch (err) { console.error(err); res.status(500).json({ error: 'Errore' }); }
+});
+
+// POST /api/allievo/push-test — invia push di test all'utente corrente
+router.post('/allievo/push-test', ...requireRole('allievo'), async (req, res) => {
+  try {
+    await inviaPushAllievo(req.user.allievoId, '🧪 Test notifica', 'Le notifiche push funzionano correttamente!');
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 // POST /api/allievo/richiesta-pagamento — allievo segnala arretrati da regolarizzare
