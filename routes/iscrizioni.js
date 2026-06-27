@@ -2,6 +2,7 @@ const express    = require('express');
 const PDFDocument = require('pdfkit');
 const nodemailer  = require('nodemailer');
 const crypto      = require('crypto');
+const bcrypt      = require('bcrypt');
 const { pool }    = require('../db');
 const { requireRole, authenticateToken } = require('../Middleware/auth');
 
@@ -56,6 +57,14 @@ pool.query(`
     created_at               TIMESTAMPTZ DEFAULT NOW(),
     accettata_il             TIMESTAMPTZ
   )
+`).catch(() => {});
+
+// Aggiunge cap/citta/provincia ad allievi se non presenti
+pool.query(`
+  ALTER TABLE allievi
+  ADD COLUMN IF NOT EXISTS cap      TEXT,
+  ADD COLUMN IF NOT EXISTS citta    TEXT,
+  ADD COLUMN IF NOT EXISTS provincia TEXT
 `).catch(() => {});
 
 // ── Mailer ─────────────────────────────────────────────────────────────────
@@ -207,10 +216,17 @@ async function inviaEmailDirezione(isc, pdfBuffer) {
   });
 }
 
-async function inviaEmailAllievo(isc, pdfBuffer) {
+async function inviaEmailAllievo(isc, pdfBuffer, tempPassword = null) {
   const dest = isc.minore ? isc.genitore_email : isc.email;
   if (!process.env.SMTP_USER || !dest) return;
   const transport = createTransport();
+  const credenzialiHtml = tempPassword ? `
+    <p style="margin-top:16px;padding:12px 16px;background:#f0f4ff;border-left:4px solid #3b5bdb;border-radius:4px;">
+      <strong>Le tue credenziali di accesso all'app:</strong><br>
+      Username: <code>${isc.email}</code><br>
+      Password temporanea: <code>${tempPassword}</code><br>
+      <small>Al primo accesso ti verrà chiesto di cambiarla.</small>
+    </p>` : '';
   await transport.sendMail({
     from:    `"AMA Music Academy" <${process.env.SMTP_USER}>`,
     to:      dest,
@@ -218,6 +234,7 @@ async function inviaEmailAllievo(isc, pdfBuffer) {
     html: `
       <p>Gentile ${isc.nome} ${isc.cognome},</p>
       <p>La tua domanda di iscrizione all'<strong>AMA Music Academy</strong> è stata <strong>accettata</strong>.</p>
+      ${credenzialiHtml}
       <p>In allegato trovi il modulo firmato dalla direzione.</p>
       <p>Benvenuto/a nella nostra accademia!</p>
       <br><p>AMA Music Academy</p>
@@ -323,12 +340,57 @@ router.patch('/admin/iscrizioni/:id/accetta', authenticateToken, async (req, res
     if (!rows.length) return res.status(404).json({ error: 'Non trovata' });
     const isc = rows[0];
 
+    // ── Crea allievo + utente ──────────────────────────────────────────────
+    let tempPassword = null;
+    let allievoId = null;
+    try {
+      // Controlla se esiste già un allievo con questa email
+      const existing = await pool.query('SELECT id FROM allievi WHERE LOWER(email)=LOWER($1)', [isc.email]);
+      if (!existing.rows.length) {
+        const { rows: ar } = await pool.query(`
+          INSERT INTO allievi (
+            nome, cognome, email, telefono, data_nascita, strumento, note,
+            codice_fiscale, luogo_nascita, indirizzo, cap, citta, provincia,
+            minore, genitore_nome, genitore_cognome, genitore_cf,
+            genitore_data_nascita, genitore_luogo_nascita, genitore_indirizzo,
+            genitore_telefono, genitore_email,
+            accettazione_reg, data_accettazione_reg,
+            data_iscrizione, quota_mensile
+          ) VALUES (
+            $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,
+            $18,$19,$20,$21,$22,TRUE,NOW(),NOW(),0
+          ) RETURNING id
+        `, [
+          isc.nome, isc.cognome, isc.email, isc.telefono, isc.data_nascita, isc.strumento, isc.note,
+          isc.codice_fiscale, isc.luogo_nascita, isc.indirizzo, isc.cap, isc.citta, isc.provincia,
+          isc.minore, isc.genitore_nome, isc.genitore_cognome, isc.genitore_cf,
+          isc.genitore_data_nascita, isc.genitore_luogo_nascita, isc.genitore_indirizzo,
+          isc.genitore_telefono, isc.genitore_email,
+        ]);
+        allievoId = ar[0].id;
+
+        // Crea credenziali: username = email, password temporanea
+        tempPassword = crypto.randomBytes(5).toString('hex'); // es. "a3f9c2e1b7"
+        const hash = await bcrypt.hash(tempPassword, 10);
+        const username = (isc.email || `allievo_${allievoId}`).toLowerCase().trim();
+        await pool.query(`
+          INSERT INTO utenti (username, password, ruolo, allievo_id)
+          VALUES ($1,$2,'allievo',$3)
+          ON CONFLICT (username) DO NOTHING
+        `, [username, hash, allievoId]);
+      } else {
+        allievoId = existing.rows[0].id;
+      }
+    } catch (e) {
+      console.error('Errore creazione allievo/utente:', e);
+    }
+
     // Genera PDF con firma presidente e invia all'allievo
     generatePDF(isc, { withPresidente: true })
-      .then(pdf => inviaEmailAllievo(isc, pdf))
+      .then(pdf => inviaEmailAllievo(isc, pdf, tempPassword))
       .catch(console.error);
 
-    res.json({ ok: true });
+    res.json({ ok: true, allievoId });
   } catch (err) { console.error(err); res.status(500).json({ error: 'Errore' }); }
 });
 

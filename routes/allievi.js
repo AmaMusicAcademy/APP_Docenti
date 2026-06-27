@@ -103,22 +103,31 @@ router.post('/allievi', ...requireRole('admin'), async (req, res) => {
 router.put('/allievi/:id', ...requireRole('admin'), async (req, res) => {
   const { id } = req.params;
   const {
-    nome,
-    cognome,
-    email = '',
-    telefono = '',
-    note = '',
-    strumento = '',
-    data_nascita = null,
-    quota_mensile = 0,
+    nome, cognome, email = '', telefono = '', note = '', strumento = '',
+    data_nascita = null, quota_mensile = 0,
+    codice_fiscale = '', luogo_nascita = '',
+    indirizzo = '', cap = '', citta = '', provincia = '',
+    minore = false,
+    genitore_nome = '', genitore_cognome = '', genitore_cf = '',
+    genitore_data_nascita = null, genitore_luogo_nascita = '',
+    genitore_indirizzo = '', genitore_telefono = '', genitore_email = '',
   } = req.body;
   try {
     const { rows } = await pool.query(
       `UPDATE allievi SET
-        nome=$1, cognome=$2, email=$3, telefono=$4, note=$5,
-        strumento=$6, data_nascita=$7, quota_mensile=$8
-       WHERE id=$9 RETURNING *`,
-      [nome, cognome, email, telefono, note, strumento, data_nascita, quota_mensile, id]
+        nome=$1, cognome=$2, email=$3, telefono=$4, note=$5, strumento=$6,
+        data_nascita=$7, quota_mensile=$8,
+        codice_fiscale=$9, luogo_nascita=$10,
+        indirizzo=$11, cap=$12, citta=$13, provincia=$14,
+        minore=$15,
+        genitore_nome=$16, genitore_cognome=$17, genitore_cf=$18,
+        genitore_data_nascita=$19, genitore_luogo_nascita=$20,
+        genitore_indirizzo=$21, genitore_telefono=$22, genitore_email=$23
+       WHERE id=$24 RETURNING *`,
+      [nome, cognome, email, telefono, note, strumento, data_nascita, quota_mensile,
+       codice_fiscale, luogo_nascita, indirizzo, cap, citta, provincia, !!minore,
+       genitore_nome, genitore_cognome, genitore_cf, genitore_data_nascita || null,
+       genitore_luogo_nascita, genitore_indirizzo, genitore_telefono, genitore_email, id]
     );
     if (rows.length === 0) return res.status(404).json({ error: 'Allievo non trovato' });
     res.json(rows[0]);

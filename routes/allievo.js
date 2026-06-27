@@ -41,7 +41,7 @@ const dateOnly = (d) => {
 router.get('/allievo/me', ...requireRole('allievo'), async (req, res) => {
   try {
     const { rows } = await pool.query(
-      `SELECT id, nome, cognome, email, telefono, indirizzo, strumento,
+      `SELECT id, nome, cognome, email, telefono, indirizzo, cap, citta, provincia, strumento,
               data_nascita, luogo_nascita, codice_fiscale, data_iscrizione, quota_mensile,
               minore, genitore_nome, genitore_cognome, genitore_cf, genitore_data_nascita,
               genitore_luogo_nascita, genitore_indirizzo, genitore_telefono, genitore_email,
@@ -253,7 +253,7 @@ pool.query(`
 router.patch('/allievo/profilo', ...requireRole('allievo'), async (req, res) => {
   const id = req.user.allievoId;
   const campi = [
-    'email','telefono','indirizzo','codice_fiscale','luogo_nascita','data_nascita',
+    'email','telefono','indirizzo','cap','citta','provincia','codice_fiscale','luogo_nascita','data_nascita',
     'minore',
     'genitore_nome','genitore_cognome','genitore_cf','genitore_data_nascita',
     'genitore_luogo_nascita','genitore_indirizzo','genitore_telefono','genitore_email',
