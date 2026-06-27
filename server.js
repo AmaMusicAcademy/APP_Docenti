@@ -7,11 +7,19 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.use(cors({
-  origin: [
-    'https://accademia-frontend.vercel.app',
-    'http://localhost:3001',
-    'http://localhost:3000',
-  ],
+  origin: (origin, callback) => {
+    const allowed = [
+      'https://accademia-frontend.vercel.app',
+      'http://localhost:3001',
+      'http://localhost:3000',
+    ];
+    // Accetta tutti i deploy Vercel del progetto (preview branch inclusi)
+    if (!origin || allowed.includes(origin) || /^https:\/\/accademia-frontend(-[a-z0-9-]+)?\.vercel\.app$/.test(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
   credentials: true,
 }));
 // Webhook Stripe DEVE stare prima di express.json() per ricevere il raw body
