@@ -17,6 +17,8 @@
     "multer": "^2.0.1",
     "mysql2": "^3.14.1",
     "node-schedule": "^2.1.1",
+    "nodemailer": "^9.0.1",
+    "pdfkit": "^0.19.1",
     "pg": "^8.16.0",
     "stripe": "^22.3.0",
     "web-push": "^3.6.7"

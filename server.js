@@ -40,6 +40,7 @@ app.use('/api', require('./routes/admin'));
 app.use('/api', require('./routes/allievo'));
 app.use('/api', require('./routes/setup'));
 app.use('/api', require('./routes/giorni-chiusura'));
+app.use('/api', require('./routes/iscrizioni'));
 
 // ----------------------
 // Health + debug routes
