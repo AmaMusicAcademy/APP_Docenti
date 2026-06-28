@@ -346,80 +346,47 @@ router.patch('/admin/iscrizioni/:id/accetta', authenticateToken, async (req, res
     // ── Crea allievo + utente ──────────────────────────────────────────────
     let tempPassword = null;
     let allievoId = null;
-    let dbgError = null;
     try {
-      // Assicura che le colonne estese esistano
+      // INSERT con soli campi base (sempre presenti) — crea sempre un nuovo allievo
+      // (email/telefono condivisi sono ammessi, es. fratelli minorenni con contatti del genitore)
+      const { rows: ar } = await pool.query(
+        `INSERT INTO allievi (nome, cognome, email, telefono, strumento, data_nascita, note, data_iscrizione, quota_mensile)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,NOW(),0) RETURNING id`,
+        [isc.nome, isc.cognome, isc.email, isc.telefono, isc.strumento, isc.data_nascita || null, isc.note]
+      );
+      allievoId = ar[0].id;
+
+      // UPDATE con campi estesi
       await pool.query(`
-        ALTER TABLE allievi
-          ADD COLUMN IF NOT EXISTS codice_fiscale         TEXT,
-          ADD COLUMN IF NOT EXISTS luogo_nascita          TEXT,
-          ADD COLUMN IF NOT EXISTS indirizzo              TEXT,
-          ADD COLUMN IF NOT EXISTS cap                    TEXT,
-          ADD COLUMN IF NOT EXISTS citta                  TEXT,
-          ADD COLUMN IF NOT EXISTS provincia              TEXT,
-          ADD COLUMN IF NOT EXISTS minore                 BOOLEAN DEFAULT FALSE,
-          ADD COLUMN IF NOT EXISTS genitore_nome          TEXT,
-          ADD COLUMN IF NOT EXISTS genitore_cognome       TEXT,
-          ADD COLUMN IF NOT EXISTS genitore_cf            TEXT,
-          ADD COLUMN IF NOT EXISTS genitore_data_nascita  DATE,
-          ADD COLUMN IF NOT EXISTS genitore_luogo_nascita TEXT,
-          ADD COLUMN IF NOT EXISTS genitore_indirizzo     TEXT,
-          ADD COLUMN IF NOT EXISTS genitore_telefono      TEXT,
-          ADD COLUMN IF NOT EXISTS genitore_email         TEXT,
-          ADD COLUMN IF NOT EXISTS accettazione_reg       BOOLEAN DEFAULT FALSE,
-          ADD COLUMN IF NOT EXISTS data_accettazione_reg  TIMESTAMPTZ
-      `);
+        UPDATE allievi SET
+          codice_fiscale=$1, luogo_nascita=$2, indirizzo=$3, cap=$4, citta=$5, provincia=$6,
+          minore=$7,
+          genitore_nome=$8, genitore_cognome=$9, genitore_cf=$10,
+          genitore_data_nascita=$11, genitore_luogo_nascita=$12, genitore_indirizzo=$13,
+          genitore_telefono=$14, genitore_email=$15,
+          accettazione_reg=TRUE, data_accettazione_reg=NOW()
+        WHERE id=$16
+      `, [
+        isc.codice_fiscale, isc.luogo_nascita, isc.indirizzo, isc.cap, isc.citta, isc.provincia,
+        !!isc.minore,
+        isc.genitore_nome, isc.genitore_cognome, isc.genitore_cf,
+        isc.genitore_data_nascita || null, isc.genitore_luogo_nascita, isc.genitore_indirizzo,
+        isc.genitore_telefono, isc.genitore_email,
+        allievoId,
+      ]);
 
-      // Controlla se esiste già un allievo con questa email
-      const emailQuery = isc.email ? 'SELECT id FROM allievi WHERE LOWER(email)=LOWER($1)' : 'SELECT NULL WHERE FALSE';
-      const existing = isc.email ? await pool.query(emailQuery, [isc.email]) : { rows: [] };
+      // Crea credenziali: username = email se disponibile, altrimenti allievo_{id}
+      tempPassword = crypto.randomBytes(5).toString('hex');
+      const hash = await bcrypt.hash(tempPassword, 10);
+      const username = (isc.email || `allievo_${allievoId}`).toLowerCase().trim();
+      await pool.query(
+        `INSERT INTO utenti (username, password, ruolo, allievo_id) VALUES ($1,$2,'allievo',$3) ON CONFLICT (username) DO UPDATE SET allievo_id=EXCLUDED.allievo_id`,
+        [username, hash, allievoId]
+      );
 
-      if (!existing.rows.length) {
-        // INSERT con soli campi base (sempre presenti)
-        const { rows: ar } = await pool.query(
-          `INSERT INTO allievi (nome, cognome, email, telefono, strumento, data_nascita, note, data_iscrizione, quota_mensile)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,NOW(),0) RETURNING id`,
-          [isc.nome, isc.cognome, isc.email, isc.telefono, isc.strumento, isc.data_nascita || null, isc.note]
-        );
-        allievoId = ar[0].id;
-
-        // UPDATE con campi estesi
-        await pool.query(`
-          UPDATE allievi SET
-            codice_fiscale=$1, luogo_nascita=$2, indirizzo=$3, cap=$4, citta=$5, provincia=$6,
-            minore=$7,
-            genitore_nome=$8, genitore_cognome=$9, genitore_cf=$10,
-            genitore_data_nascita=$11, genitore_luogo_nascita=$12, genitore_indirizzo=$13,
-            genitore_telefono=$14, genitore_email=$15,
-            accettazione_reg=TRUE, data_accettazione_reg=NOW()
-          WHERE id=$16
-        `, [
-          isc.codice_fiscale, isc.luogo_nascita, isc.indirizzo, isc.cap, isc.citta, isc.provincia,
-          !!isc.minore,
-          isc.genitore_nome, isc.genitore_cognome, isc.genitore_cf,
-          isc.genitore_data_nascita || null, isc.genitore_luogo_nascita, isc.genitore_indirizzo,
-          isc.genitore_telefono, isc.genitore_email,
-          allievoId,
-        ]);
-
-        // Crea credenziali
-        tempPassword = crypto.randomBytes(5).toString('hex');
-        const hash = await bcrypt.hash(tempPassword, 10);
-        const username = (isc.email || `allievo_${allievoId}`).toLowerCase().trim();
-        await pool.query(
-          `INSERT INTO utenti (username, password, ruolo, allievo_id) VALUES ($1,$2,'allievo',$3) ON CONFLICT (username) DO NOTHING`,
-          [username, hash, allievoId]
-        );
-      } else {
-        allievoId = existing.rows[0].id;
-      }
-
-      if (allievoId) {
-        await pool.query('UPDATE iscrizioni SET allievo_id=$1 WHERE id=$2', [allievoId, req.params.id]);
-      }
+      await pool.query('UPDATE iscrizioni SET allievo_id=$1 WHERE id=$2', [allievoId, req.params.id]);
     } catch (e) {
       console.error('Errore creazione allievo/utente:', e);
-      dbgError = e.message;
     }
 
     // Genera PDF con firma presidente e invia all'allievo
@@ -427,7 +394,7 @@ router.patch('/admin/iscrizioni/:id/accetta', authenticateToken, async (req, res
       .then(pdf => inviaEmailAllievo(isc, pdf, tempPassword))
       .catch(console.error);
 
-    res.json({ ok: true, allievoId, dbgError });
+    res.json({ ok: true, allievoId });
   } catch (err) { console.error(err); res.status(500).json({ error: 'Errore' }); }
 });
 
