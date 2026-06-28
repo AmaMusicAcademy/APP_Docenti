@@ -48,21 +48,25 @@ app.use('/api', require('./routes/iscrizioni'));
 // ----------------------
 app.get('/api/health', (_req, res) => res.json({ ok: true, ts: new Date().toISOString() }));
 
-app.get('/api/debug-db', async (_req, res) => {
+app.get('/api/dbcheck', async (_req, res) => {
   try {
-    const [allievi, iscrizioni, utenti, dbInfo] = await Promise.all([
+    const [allievi, iscrizioni, utenti, dbInfo, ultimi, iscUltimi] = await Promise.all([
       pool.query('SELECT COUNT(*) FROM allievi'),
       pool.query('SELECT COUNT(*) FROM iscrizioni'),
       pool.query('SELECT COUNT(*) FROM utenti'),
       pool.query('SELECT current_database(), current_user, inet_server_addr()'),
+      pool.query('SELECT id, nome, cognome, email FROM allievi ORDER BY id DESC LIMIT 5'),
+      pool.query('SELECT id, nome, cognome, stato, allievo_id FROM iscrizioni ORDER BY id DESC LIMIT 5'),
     ]);
     res.json({
-      database:   dbInfo.rows[0].current_database,
-      db_user:    dbInfo.rows[0].current_user,
-      db_server:  dbInfo.rows[0].inet_server_addr,
-      allievi:    parseInt(allievi.rows[0].count),
-      iscrizioni: parseInt(iscrizioni.rows[0].count),
-      utenti:     parseInt(utenti.rows[0].count),
+      database:      dbInfo.rows[0].current_database,
+      db_user:       dbInfo.rows[0].current_user,
+      db_server:     dbInfo.rows[0].inet_server_addr,
+      allievi_count: parseInt(allievi.rows[0].count),
+      iscrizioni_count: parseInt(iscrizioni.rows[0].count),
+      utenti_count:  parseInt(utenti.rows[0].count),
+      ultimi_allievi: ultimi.rows,
+      ultime_iscrizioni: iscUltimi.rows,
     });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
