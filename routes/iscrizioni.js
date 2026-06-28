@@ -67,6 +67,8 @@ pool.query(`
   ADD COLUMN IF NOT EXISTS provincia TEXT
 `).catch(() => {});
 
+pool.query(`ALTER TABLE iscrizioni ADD COLUMN IF NOT EXISTS motivazione_rifiuto TEXT`).catch(() => {});
+
 // ── Mailer ─────────────────────────────────────────────────────────────────
 function createTransport() {
   return nodemailer.createTransport({
@@ -397,8 +399,12 @@ router.patch('/admin/iscrizioni/:id/accetta', authenticateToken, async (req, res
 // ── PATCH /api/admin/iscrizioni/:id/rifiuta ────────────────────────────────
 router.patch('/admin/iscrizioni/:id/rifiuta', authenticateToken, async (req, res) => {
   if (req.user.ruolo !== 'admin') return res.status(403).json({ error: 'Accesso negato' });
+  const { motivazione } = req.body || {};
   try {
-    await pool.query(`UPDATE iscrizioni SET stato='rifiutata' WHERE id=$1`, [req.params.id]);
+    await pool.query(
+      `UPDATE iscrizioni SET stato='rifiutata', motivazione_rifiuto=$1 WHERE id=$2`,
+      [motivazione || null, req.params.id]
+    );
     res.json({ ok: true });
   } catch (err) { res.status(500).json({ error: 'Errore' }); }
 });
