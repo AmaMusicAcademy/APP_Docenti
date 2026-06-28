@@ -80,7 +80,7 @@ router.post('/admin/allievi/:id/credenziali', ...requireRole('admin'), async (re
 // GET /api/admin/dashboard — KPI sintetici
 router.get('/admin/dashboard', ...requireRole('admin'), async (_req, res) => {
   try {
-    const [lezioniSettimana, pagamentiMancanti, allieviAttivi, insegnantiCount] = await Promise.all([
+    const [lezioniSettimana, pagamentiMancanti, allieviAttivi, insegnantiCount, iscrizioniAttesa] = await Promise.all([
       // Lezioni questa settimana
       pool.query(`
         SELECT COUNT(*) FROM lezioni
@@ -104,6 +104,8 @@ router.get('/admin/dashboard', ...requireRole('admin'), async (_req, res) => {
       pool.query(`SELECT COUNT(*) FROM allievi WHERE attivo IS DISTINCT FROM FALSE`),
       // Insegnanti
       pool.query(`SELECT COUNT(*) FROM insegnanti`),
+      // Iscrizioni in attesa
+      pool.query(`SELECT COUNT(*) FROM iscrizioni WHERE stato='in_attesa'`),
     ]);
 
     res.json({
@@ -111,6 +113,7 @@ router.get('/admin/dashboard', ...requireRole('admin'), async (_req, res) => {
       pagamentiMancanti: parseInt(pagamentiMancanti.rows[0].count, 10),
       allieviAttivi: parseInt(allieviAttivi.rows[0].count, 10),
       insegnanti: parseInt(insegnantiCount.rows[0].count, 10),
+      iscrizioniAttesa: parseInt(iscrizioniAttesa.rows[0].count, 10),
     });
   } catch (err) {
     console.error(err);
