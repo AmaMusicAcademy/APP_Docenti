@@ -207,7 +207,7 @@ async function inviaEmailDirezione(isc, pdfBuffer) {
   const transport = createTransport();
   await transport.sendMail({
     from:    `"AMA Music Academy" <${process.env.SMTP_USER}>`,
-    to:      'direzione@amamusicacademy.it',
+    to:      process.env.SEGRETERIA_EMAIL || 'segreteria@amamusicacademy.it',
     subject: `Nuova domanda di iscrizione — ${isc.nome} ${isc.cognome}`,
     html: `
       <p>È stata ricevuta una nuova domanda di iscrizione da <strong>${isc.nome} ${isc.cognome}</strong>.</p>
