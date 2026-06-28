@@ -47,6 +47,25 @@ app.use('/api', require('./routes/iscrizioni'));
 // Health + debug routes
 // ----------------------
 app.get('/api/health', (_req, res) => res.json({ ok: true, ts: new Date().toISOString() }));
+
+app.get('/api/debug-db', async (_req, res) => {
+  try {
+    const [allievi, iscrizioni, utenti, dbInfo] = await Promise.all([
+      pool.query('SELECT COUNT(*) FROM allievi'),
+      pool.query('SELECT COUNT(*) FROM iscrizioni'),
+      pool.query('SELECT COUNT(*) FROM utenti'),
+      pool.query('SELECT current_database(), current_user, inet_server_addr()'),
+    ]);
+    res.json({
+      database:   dbInfo.rows[0].current_database,
+      db_user:    dbInfo.rows[0].current_user,
+      db_server:  dbInfo.rows[0].inet_server_addr,
+      allievi:    parseInt(allievi.rows[0].count),
+      iscrizioni: parseInt(iscrizioni.rows[0].count),
+      utenti:     parseInt(utenti.rows[0].count),
+    });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
 app.get('/api/_routes', (_req, res) => {
   const routes = [];
   app._router.stack.forEach((layer) => {
