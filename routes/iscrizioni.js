@@ -68,6 +68,7 @@ pool.query(`
 `).catch(() => {});
 
 pool.query(`ALTER TABLE iscrizioni ADD COLUMN IF NOT EXISTS motivazione_rifiuto TEXT`).catch(() => {});
+pool.query(`ALTER TABLE iscrizioni ADD COLUMN IF NOT EXISTS allievo_id INTEGER`).catch(() => {});
 
 // ── Mailer ─────────────────────────────────────────────────────────────────
 function createTransport() {
@@ -372,7 +373,7 @@ router.patch('/admin/iscrizioni/:id/accetta', authenticateToken, async (req, res
         allievoId = ar[0].id;
 
         // Crea credenziali: username = email, password temporanea
-        tempPassword = crypto.randomBytes(5).toString('hex'); // es. "a3f9c2e1b7"
+        tempPassword = crypto.randomBytes(5).toString('hex');
         const hash = await bcrypt.hash(tempPassword, 10);
         const username = (isc.email || `allievo_${allievoId}`).toLowerCase().trim();
         await pool.query(`
@@ -382,6 +383,11 @@ router.patch('/admin/iscrizioni/:id/accetta', authenticateToken, async (req, res
         `, [username, hash, allievoId]);
       } else {
         allievoId = existing.rows[0].id;
+      }
+
+      // Salva il riferimento allievo nell'iscrizione
+      if (allievoId) {
+        await pool.query('UPDATE iscrizioni SET allievo_id=$1 WHERE id=$2', [allievoId, req.params.id]);
       }
     } catch (e) {
       console.error('Errore creazione allievo/utente:', e);
@@ -401,12 +407,23 @@ router.patch('/admin/iscrizioni/:id/rifiuta', authenticateToken, async (req, res
   if (req.user.ruolo !== 'admin') return res.status(403).json({ error: 'Accesso negato' });
   const { motivazione } = req.body || {};
   try {
+    // Cerca allievo_id collegato a questa iscrizione
+    const { rows } = await pool.query('SELECT allievo_id FROM iscrizioni WHERE id=$1', [req.params.id]);
+    const allievoId = rows[0]?.allievo_id;
+
     await pool.query(
       `UPDATE iscrizioni SET stato='rifiutata', motivazione_rifiuto=$1 WHERE id=$2`,
       [motivazione || null, req.params.id]
     );
+
+    // Cancella allievo e utente creati da questa iscrizione
+    if (allievoId) {
+      await pool.query('DELETE FROM utenti WHERE allievo_id=$1', [allievoId]);
+      await pool.query('DELETE FROM allievi WHERE id=$1', [allievoId]);
+    }
+
     res.json({ ok: true });
-  } catch (err) { res.status(500).json({ error: 'Errore' }); }
+  } catch (err) { console.error(err); res.status(500).json({ error: 'Errore' }); }
 });
 
 // ── GET /api/iscrizione/:token/pdf — download PDF allievo ─────────────────
