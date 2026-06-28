@@ -393,37 +393,5 @@ router.post('/allievo/richiesta-pagamento', ...requireRole('allievo'), async (re
   } catch (err) { console.error(err); res.status(500).json({ error: 'Errore' }); }
 });
 
-// POST /api/iscrizione (pubblico, senza auth)
-router.post('/iscrizione', async (req, res) => {
-  const {
-    nome,
-    cognome,
-    email = '',
-    telefono = '',
-    strumento = '',
-    data_nascita = null,
-    note = '',
-  } = req.body;
-
-  if (!nome || !cognome || !email) {
-    return res.status(400).json({ error: 'Nome, cognome e email sono obbligatori' });
-  }
-
-  try {
-    const { rows } = await pool.query(
-      `INSERT INTO allievi (nome, cognome, email, telefono, strumento, data_nascita, note, stato_iscrizione, data_iscrizione, quota_mensile)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,'in_attesa', CURRENT_DATE, 0)
-       RETURNING id, nome, cognome, email`,
-      [nome, cognome, email, telefono, strumento, data_nascita, note]
-    );
-    res.status(201).json({
-      message: 'Richiesta di iscrizione ricevuta. Sarai contattato dall\'accademia.',
-      allievo: rows[0],
-    });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Errore nella registrazione. Riprova più tardi.' });
-  }
-});
 
 module.exports = router;
