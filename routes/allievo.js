@@ -399,7 +399,7 @@ router.get('/allievo/iscrizione-pdf', ...requireRole('allievo'), async (req, res
   try {
     const { rows } = await pool.query(
       `SELECT token_download FROM iscrizioni WHERE allievo_id=$1 AND stato='accettata' ORDER BY accettata_il DESC LIMIT 1`,
-      [req.user.allievo_id]
+      [req.user.allievoId]
     );
     if (!rows.length || !rows[0].token_download) return res.json({ token: null });
     res.json({ token: rows[0].token_download });
