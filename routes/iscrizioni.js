@@ -346,6 +346,7 @@ router.patch('/admin/iscrizioni/:id/accetta', authenticateToken, async (req, res
     // ── Crea allievo + utente ──────────────────────────────────────────────
     let tempPassword = null;
     let allievoId = null;
+    let dbgError = null;
     try {
       // Assicura che le colonne estese esistano
       await pool.query(`
@@ -418,6 +419,7 @@ router.patch('/admin/iscrizioni/:id/accetta', authenticateToken, async (req, res
       }
     } catch (e) {
       console.error('Errore creazione allievo/utente:', e);
+      dbgError = e.message;
     }
 
     // Genera PDF con firma presidente e invia all'allievo
@@ -425,7 +427,7 @@ router.patch('/admin/iscrizioni/:id/accetta', authenticateToken, async (req, res
       .then(pdf => inviaEmailAllievo(isc, pdf, tempPassword))
       .catch(console.error);
 
-    res.json({ ok: true, allievoId });
+    res.json({ ok: true, allievoId, dbgError });
   } catch (err) { console.error(err); res.status(500).json({ error: 'Errore' }); }
 });
 
