@@ -344,4 +344,16 @@ router.delete('/allievi/:id/quota-associativa', ...requireRole('admin'), async (
   }
 });
 
+// GET /api/allievi/:id/iscrizione-pdf — token download PDF iscrizione accettata
+router.get('/allievi/:id/iscrizione-pdf', ...requireRole('admin'), async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT token_download FROM iscrizioni WHERE allievo_id=$1 AND stato='accettata' ORDER BY accettata_il DESC LIMIT 1`,
+      [req.params.id]
+    );
+    if (!rows.length || !rows[0].token_download) return res.json({ token: null });
+    res.json({ token: rows[0].token_download });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 module.exports = router;
