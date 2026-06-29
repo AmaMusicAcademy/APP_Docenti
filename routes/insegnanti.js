@@ -259,13 +259,17 @@ router.get('/insegnanti/:id/compenso', authenticateToken, async (req, res) => {
       };
     });
 
+    const compensoTotale = Math.round(oreTotali * tariffaOraria * 100) / 100;
     res.json({
       mese,
       tariffaOraria,
       lezioniSvolte: result.rowCount,
       oreTotali: Math.round(oreTotali * 100) / 100,
-      compensoTotale: Math.round(oreTotali * tariffaOraria * 100) / 100,
+      compensoTotale,
       lezioni,
+      // alias per compatibilità con versione precedente del frontend
+      lezioniPagate: result.rowCount,
+      compenso: compensoTotale,
     });
   } catch (err) {
     console.error(err);
