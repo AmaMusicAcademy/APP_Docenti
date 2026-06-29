@@ -240,6 +240,34 @@ router.get('/allievi/:id/conteggio-lezioni', async (req, res) => {
   }
 });
 
+// GET /api/allievi/:id/lezioni-per-stato?stato=svolta|annullata|rimandata
+router.get('/allievi/:id/lezioni-per-stato', authenticateToken, async (req, res) => {
+  const { id } = req.params;
+  const { stato } = req.query;
+  try {
+    let whereStato;
+    if (stato === 'svolta')    whereStato = `l.stato = 'svolta'`;
+    else if (stato === 'annullata') whereStato = `l.stato = 'annullata'`;
+    else if (stato === 'rimandata') whereStato = `l.stato = 'rimandata' AND l.riprogrammata = FALSE`;
+    else whereStato = '1=1';
+
+    const { rows } = await pool.query(
+      `SELECT l.id, TO_CHAR(l.data,'YYYY-MM-DD') AS data, l.ora_inizio, l.ora_fine,
+              l.stato, l.aula, l.motivazione,
+              i.nome AS nome_insegnante, i.cognome AS cognome_insegnante
+       FROM lezioni l
+       LEFT JOIN insegnanti i ON l.id_insegnante = i.id
+       WHERE l.id_allievo = $1 AND ${whereStato}
+       ORDER BY l.data DESC, l.ora_inizio DESC`,
+      [id]
+    );
+    res.json(rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Errore nel recupero lezioni' });
+  }
+});
+
 // GET /api/allievi/:id/pagamenti
 router.get('/allievi/:id/pagamenti', async (req, res) => {
   try {
