@@ -80,7 +80,7 @@ router.post('/admin/allievi/:id/credenziali', ...requireRole('admin'), async (re
 // GET /api/admin/dashboard — KPI sintetici
 router.get('/admin/dashboard', ...requireRole('admin'), async (_req, res) => {
   try {
-    const [lezioniSettimana, pagamentiMancanti, allieviAttivi, insegnantiCount, iscrizioniAttesa] = await Promise.all([
+    const [lezioniSettimana, pagamentiMancanti, allieviAttivi, insegnantiCount, iscrizioniAttesa, daRiprogrammare] = await Promise.all([
       // Lezioni questa settimana
       pool.query(`
         SELECT COUNT(*) FROM lezioni
@@ -106,6 +106,8 @@ router.get('/admin/dashboard', ...requireRole('admin'), async (_req, res) => {
       pool.query(`SELECT COUNT(*) FROM insegnanti`),
       // Iscrizioni in attesa
       pool.query(`SELECT COUNT(*) FROM iscrizioni WHERE stato='in_attesa'`),
+      // Lezioni rimandate non ancora riprogrammate
+      pool.query(`SELECT COUNT(*) FROM lezioni WHERE stato='rimandata' AND riprogrammata = FALSE`),
     ]);
 
     res.json({
@@ -114,10 +116,32 @@ router.get('/admin/dashboard', ...requireRole('admin'), async (_req, res) => {
       allieviAttivi: parseInt(allieviAttivi.rows[0].count, 10),
       insegnanti: parseInt(insegnantiCount.rows[0].count, 10),
       iscrizioniAttesa: parseInt(iscrizioniAttesa.rows[0].count, 10),
+      daRiprogrammare: parseInt(daRiprogrammare.rows[0].count, 10),
     });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Errore caricamento dashboard' });
+  }
+});
+
+// GET /api/admin/lezioni-da-riprogrammare
+router.get('/admin/lezioni-da-riprogrammare', ...requireRole('admin'), async (_req, res) => {
+  try {
+    const { rows } = await pool.query(`
+      SELECT l.id, TO_CHAR(l.data,'YYYY-MM-DD') AS data, l.ora_inizio, l.ora_fine,
+             l.aula, l.motivazione,
+             a.nome AS nome_allievo, a.cognome AS cognome_allievo, a.id AS allievo_id,
+             i.nome AS nome_insegnante, i.cognome AS cognome_insegnante
+      FROM lezioni l
+      LEFT JOIN allievi a ON l.id_allievo = a.id
+      LEFT JOIN insegnanti i ON l.id_insegnante = i.id
+      WHERE l.stato = 'rimandata' AND l.riprogrammata = FALSE
+      ORDER BY l.data DESC, l.ora_inizio DESC
+    `);
+    res.json(rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Errore recupero lezioni da riprogrammare' });
   }
 });
 
