@@ -227,7 +227,7 @@ router.get('/insegnanti/:id/compenso', authenticateToken, async (req, res) => {
     const insRes = await pool.query('SELECT tariffa_oraria FROM insegnanti WHERE id = $1', [id]);
     const tariffaOraria = parseFloat(insRes.rows[0]?.tariffa_oraria ?? 15);
 
-    // Lezioni conteggiate: svolte, annullate, rimandate riprogrammate
+    // Lezioni conteggiate: svolte + annullate nel mese di riferimento
     const result = await pool.query(
       `SELECT l.id, l.data, l.ora_inizio, l.ora_fine, l.stato, l.aula, l.riprogrammata,
               a.nome AS nome_allievo, a.cognome AS cognome_allievo,
@@ -235,11 +235,7 @@ router.get('/insegnanti/:id/compenso', authenticateToken, async (req, res) => {
        FROM lezioni l
        LEFT JOIN allievi a ON l.id_allievo = a.id
        WHERE l.id_insegnante = $1
-         AND (
-           l.stato = 'svolta'
-           OR l.stato = 'annullata'
-           OR (l.stato = 'rimandata' AND l.riprogrammata = TRUE)
-         )
+         AND l.stato IN ('svolta', 'annullata')
          AND DATE_TRUNC('month', l.data) = DATE_TRUNC('month', $2::DATE)
        ORDER BY l.data, l.ora_inizio`,
       [id, `${mese}-01`]
