@@ -254,6 +254,7 @@ router.get('/insegnanti/:id/compenso', authenticateToken, async (req, res) => {
         ora_fine: row.ora_fine?.slice(0, 5),
         aula: row.aula || '—',
         allievo: `${row.cognome_allievo || ''} ${row.nome_allievo || ''}`.trim() || 'Allievo',
+        stato: row.stato,
         ore: Math.round(ore * 100) / 100,
         compenso: Math.round(ore * tariffaOraria * 100) / 100,
       };
