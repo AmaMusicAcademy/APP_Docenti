@@ -42,6 +42,7 @@ app.use('/api', require('./routes/allievo'));
 app.use('/api', require('./routes/setup'));
 app.use('/api', require('./routes/giorni-chiusura'));
 app.use('/api', require('./routes/iscrizioni'));
+app.use('/api', require('./routes/qonto'));
 
 // ----------------------
 // Health + debug routes
@@ -72,6 +73,7 @@ app.get('/api/_routes', (_req, res) => {
 // ----------------------
 const { pool } = require('./db');
 const { avviaCron } = require('./cron/notifiche-pagamento');
+const { avviaQontoCron } = require('./cron/qonto-sync');
 
 pool.query(`
   CREATE TABLE IF NOT EXISTS cron_log (
@@ -84,4 +86,5 @@ pool.query(`
 app.listen(PORT, () => {
   console.log(`Server AMA in ascolto sulla porta ${PORT}`);
   avviaCron();
+  avviaQontoCron();
 });
