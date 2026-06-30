@@ -42,7 +42,7 @@ app.use('/api', require('./routes/allievo'));
 app.use('/api', require('./routes/setup'));
 app.use('/api', require('./routes/giorni-chiusura'));
 app.use('/api', require('./routes/iscrizioni'));
-app.use('/api', require('./routes/qonto'));
+app.use('/api', require('./routes/qonto').router);
 
 // ----------------------
 // Health + debug routes
