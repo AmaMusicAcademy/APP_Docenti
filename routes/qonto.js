@@ -40,11 +40,8 @@ async function ensureTables() {
       aggiornato_il   TIMESTAMPTZ DEFAULT NOW()
     );
   `);
-  -- migrazione: aggiunge colonne se non esistono (idempotente)
-  await pool.query(`
-    ALTER TABLE qonto_transazioni ADD COLUMN IF NOT EXISTS mesi_registrati JSONB;
-    ALTER TABLE qonto_transazioni ADD COLUMN IF NOT EXISTS scartata BOOLEAN DEFAULT FALSE;
-  `).catch(() => {});
+  await pool.query(`ALTER TABLE qonto_transazioni ADD COLUMN IF NOT EXISTS mesi_registrati JSONB`).catch(() => {});
+  await pool.query(`ALTER TABLE qonto_transazioni ADD COLUMN IF NOT EXISTS scartata BOOLEAN DEFAULT FALSE`).catch(() => {});
 }
 
 // ── normalizza stringa ────────────────────────────────────────────────────
