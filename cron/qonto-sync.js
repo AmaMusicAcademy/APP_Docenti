@@ -54,13 +54,12 @@ async function eseguiSyncQonto() {
   );
   const after = last.length ? last[0].data : null;
 
-  const base64 = Buffer.from(`${QONTO_LOGIN}:${QONTO_SECRET_KEY}`).toString('base64');
   const params = new URLSearchParams({ side: 'credit', per_page: '100', sort_by: 'settled_at:desc' });
   if (QONTO_BANK_ACCOUNT_ID) params.set('bank_account_id', QONTO_BANK_ACCOUNT_ID);
   if (after) params.set('settled_at_from', after);
 
   const res = await fetch(`https://thirdparty.qonto.com/v2/transactions?${params}`, {
-    headers: { Authorization: `Basic ${base64}` },
+    headers: { Authorization: `${QONTO_LOGIN}:${QONTO_SECRET_KEY}` },
   });
   if (!res.ok) { console.error('[qonto-sync] API error', res.status); return; }
 

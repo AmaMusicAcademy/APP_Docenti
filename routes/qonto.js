@@ -91,7 +91,6 @@ async function fetchQontoTransazioni(after) {
   if (!QONTO_LOGIN || !QONTO_SECRET_KEY) {
     throw new Error('Credenziali Qonto non configurate (QONTO_LOGIN / QONTO_SECRET_KEY)');
   }
-  const base64 = Buffer.from(`${QONTO_LOGIN}:${QONTO_SECRET_KEY}`).toString('base64');
   const params = new URLSearchParams({
     side:     'credit',
     per_page: '100',
@@ -102,7 +101,7 @@ async function fetchQontoTransazioni(after) {
 
   const url = `https://thirdparty.qonto.com/v2/transactions?${params}`;
   const res  = await fetch(url, {
-    headers: { Authorization: `Basic ${base64}`, 'Content-Type': 'application/json' },
+    headers: { Authorization: `${QONTO_LOGIN}:${QONTO_SECRET_KEY}` },
   });
   if (!res.ok) {
     const text = await res.text().catch(() => '');
