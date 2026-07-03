@@ -126,9 +126,14 @@ router.get('/insegnanti/:id/lezioni', authenticateToken, async (req, res) => {
   }
   try {
     const { rows } = await pool.query(
-      `SELECT lezioni.*, allievi.nome AS nome_allievo, allievi.cognome AS cognome_allievo
+      `SELECT lezioni.*,
+              COALESCE(lezioni.tipo, 'individuale') AS tipo,
+              allievi.nome AS nome_allievo, allievi.cognome AS cognome_allievo,
+              COALESCE(lezioni.nome_gruppo, g.nome) AS nome_gruppo,
+              (SELECT COUNT(*) FROM lezioni_partecipanti lp WHERE lp.lezione_id = lezioni.id)::int AS num_partecipanti
        FROM lezioni
        LEFT JOIN allievi ON lezioni.id_allievo = allievi.id
+       LEFT JOIN gruppi g ON g.id = lezioni.gruppo_id
        WHERE lezioni.id_insegnante = $1
        ORDER BY lezioni.data DESC, lezioni.ora_inizio DESC`,
       [id]

@@ -1,6 +1,39 @@
 const express = require('express');
 const { pool } = require('../db');
-const { authenticateToken } = require('../Middleware/auth');
+const { authenticateToken, requireRole } = require('../Middleware/auth');
+
+// Migrazione tabelle lezioni collettive (idempotente)
+;(async () => {
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS gruppi (
+        id            SERIAL PRIMARY KEY,
+        nome          TEXT NOT NULL,
+        id_insegnante INTEGER REFERENCES insegnanti(id) ON DELETE SET NULL,
+        attivo        BOOLEAN DEFAULT TRUE
+      );
+      CREATE TABLE IF NOT EXISTS gruppi_allievi (
+        gruppo_id  INTEGER REFERENCES gruppi(id) ON DELETE CASCADE,
+        allievo_id INTEGER REFERENCES allievi(id) ON DELETE CASCADE,
+        data_ingresso DATE DEFAULT CURRENT_DATE,
+        PRIMARY KEY (gruppo_id, allievo_id)
+      );
+      CREATE TABLE IF NOT EXISTS lezioni_partecipanti (
+        id         SERIAL PRIMARY KEY,
+        lezione_id INTEGER REFERENCES lezioni(id) ON DELETE CASCADE,
+        allievo_id INTEGER REFERENCES allievi(id) ON DELETE CASCADE,
+        presente   BOOLEAN DEFAULT TRUE,
+        UNIQUE(lezione_id, allievo_id)
+      );
+    `);
+    await pool.query(`ALTER TABLE lezioni ADD COLUMN IF NOT EXISTS tipo TEXT DEFAULT 'individuale'`).catch(() => {});
+    await pool.query(`ALTER TABLE lezioni ADD COLUMN IF NOT EXISTS gruppo_id INTEGER REFERENCES gruppi(id) ON DELETE SET NULL`).catch(() => {});
+    await pool.query(`ALTER TABLE lezioni ADD COLUMN IF NOT EXISTS nome_gruppo TEXT`).catch(() => {});
+    await pool.query(`ALTER TABLE lezioni ALTER COLUMN id_allievo DROP NOT NULL`).catch(() => {});
+  } catch (e) {
+    console.error('[lezioni] migration error:', e.message);
+  }
+})();
 const webpush = require('web-push');
 
 webpush.setVapidDetails(
@@ -76,11 +109,15 @@ router.get('/lezioni', async (_req, res) => {
         l.ora_inizio, l.ora_fine, l.aula, l.stato,
         l.motivazione, l.riprogrammata, l.storico_programmazioni,
         l.id_insegnante, l.id_allievo,
+        COALESCE(l.tipo, 'individuale') AS tipo,
+        l.gruppo_id, COALESCE(l.nome_gruppo, g.nome) AS nome_gruppo,
         i.nome AS nome_insegnante, i.cognome AS cognome_insegnante,
-        a.nome AS nome_allievo, a.cognome AS cognome_allievo
+        a.nome AS nome_allievo, a.cognome AS cognome_allievo,
+        (SELECT COUNT(*) FROM lezioni_partecipanti lp WHERE lp.lezione_id = l.id)::int AS num_partecipanti
       FROM lezioni l
       LEFT JOIN insegnanti i ON l.id_insegnante = i.id
       LEFT JOIN allievi a ON l.id_allievo = a.id
+      LEFT JOIN gruppi g ON g.id = l.gruppo_id
     `);
 
     const eventi = rows
@@ -89,10 +126,15 @@ router.get('/lezioni', async (_req, res) => {
         const ymd = dateOnly(l.data);
         const oi = hhmm(l.ora_inizio);
         const of = hhmm(l.ora_fine);
+        const isCollettiva = l.tipo === 'collettiva';
         return {
           id: l.id,
+          tipo: l.tipo || 'individuale',
           id_insegnante: l.id_insegnante,
           id_allievo: l.id_allievo,
+          gruppo_id: l.gruppo_id,
+          nome_gruppo: l.nome_gruppo,
+          num_partecipanti: l.num_partecipanti || 0,
           nome_insegnante: l.nome_insegnante,
           cognome_insegnante: l.cognome_insegnante,
           nome_allievo: l.nome_allievo,
@@ -104,7 +146,9 @@ router.get('/lezioni', async (_req, res) => {
           storico_programmazioni: Array.isArray(l.storico_programmazioni)
             ? l.storico_programmazioni
             : (l.storico_programmazioni || []),
-          title: `Lezione con ${l.nome_allievo || 'Allievo'}${l.aula ? ` - Aula ${l.aula}` : ''}`,
+          title: isCollettiva
+            ? `${l.nome_gruppo || 'Gruppo'}${l.aula ? ` - Aula ${l.aula}` : ''}`
+            : `Lezione con ${l.nome_allievo || 'Allievo'}${l.aula ? ` - Aula ${l.aula}` : ''}`,
           start: ymd && oi ? `${ymd}T${oi}` : null,
           end: ymd && of ? `${ymd}T${of}` : null,
           data: ymd,
@@ -120,12 +164,13 @@ router.get('/lezioni', async (_req, res) => {
   }
 });
 
-// POST /api/lezioni (con conflict detection aula)
+// POST /api/lezioni
 router.post('/lezioni', authenticateToken, async (req, res) => {
   try {
     const {
       id_insegnante,
       id_allievo,
+      gruppo_id,
       data,
       ora_inizio,
       ora_fine,
@@ -134,7 +179,12 @@ router.post('/lezioni', authenticateToken, async (req, res) => {
       motivazione = null,
     } = req.body;
 
-    if (!id_insegnante || !id_allievo || !data || !ora_inizio || !ora_fine || !aula) {
+    const isCollettiva = Boolean(gruppo_id);
+
+    if (!id_insegnante || !data || !ora_inizio || !ora_fine || !aula) {
+      return res.status(400).json({ error: 'Dati incompleti per creare la lezione' });
+    }
+    if (!isCollettiva && !id_allievo) {
       return res.status(400).json({ error: 'Dati incompleti per creare la lezione' });
     }
 
@@ -155,20 +205,53 @@ router.post('/lezioni', authenticateToken, async (req, res) => {
       return res.status(409).json({ error: "L'aula è già occupata in questo orario." });
     }
 
+    let nomeGruppo = null;
+    if (isCollettiva) {
+      const gRes = await pool.query('SELECT nome FROM gruppi WHERE id=$1', [gruppo_id]);
+      nomeGruppo = gRes.rows[0]?.nome || null;
+    }
+
     const insert = await pool.query(
-      `INSERT INTO lezioni (id_insegnante, id_allievo, data, ora_inizio, ora_fine, aula, stato, motivazione, riprogrammata)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,false) RETURNING *`,
-      [id_insegnante, id_allievo, data, ora_inizio, ora_fine, aula, stato, motivazione]
+      `INSERT INTO lezioni (id_insegnante, id_allievo, gruppo_id, nome_gruppo, tipo, data, ora_inizio, ora_fine, aula, stato, motivazione, riprogrammata)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,false) RETURNING *`,
+      [
+        id_insegnante,
+        isCollettiva ? null : id_allievo,
+        isCollettiva ? gruppo_id : null,
+        isCollettiva ? nomeGruppo : null,
+        isCollettiva ? 'collettiva' : 'individuale',
+        data, ora_inizio, ora_fine, aula, stato, motivazione,
+      ]
     );
     const row = insert.rows[0];
+    const dataSolo = String(row.data).slice(0, 10);
 
+    if (isCollettiva) {
+      // Snapshot partecipanti dal gruppo
+      const { rows: membri } = await pool.query(
+        'SELECT allievo_id FROM gruppi_allievi WHERE gruppo_id=$1', [gruppo_id]
+      );
+      for (const m of membri) {
+        await pool.query(
+          `INSERT INTO lezioni_partecipanti (lezione_id, allievo_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`,
+          [row.id, m.allievo_id]
+        );
+      }
+      return res.status(201).json({
+        ...row,
+        nome_gruppo: nomeGruppo,
+        num_partecipanti: membri.length,
+        start: `${dataSolo}T${row.ora_inizio}`,
+        end: `${dataSolo}T${row.ora_fine}`,
+      });
+    }
+
+    // Lezione individuale — notifica push esistente
     const dett = await pool.query(
       `SELECT nome AS nome_allievo, cognome AS cognome_allievo FROM allievi WHERE id = $1`,
       [row.id_allievo]
     );
     const allievo = dett.rows[0] || {};
-    const dataSolo = String(row.data).slice(0, 10);
-
     res.status(201).json({
       ...row,
       nome_allievo: allievo.nome_allievo,
@@ -446,6 +529,37 @@ router.patch('/lezioni/:id/riprogramma', authenticateToken, async (req, res) => 
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Errore nella riprogrammazione' });
+  }
+});
+
+// GET /api/lezioni/:id/partecipanti
+router.get('/lezioni/:id/partecipanti', authenticateToken, async (req, res) => {
+  try {
+    const { rows } = await pool.query(`
+      SELECT lp.allievo_id, lp.presente,
+             a.nome, a.cognome
+      FROM lezioni_partecipanti lp
+      JOIN allievi a ON a.id = lp.allievo_id
+      WHERE lp.lezione_id = $1
+      ORDER BY a.cognome, a.nome
+    `, [req.params.id]);
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PATCH /api/lezioni/:id/partecipanti/:allievoId — toggle presenza
+router.patch('/lezioni/:id/partecipanti/:allievoId', authenticateToken, async (req, res) => {
+  const { presente } = req.body;
+  try {
+    await pool.query(
+      `UPDATE lezioni_partecipanti SET presente=$1 WHERE lezione_id=$2 AND allievo_id=$3`,
+      [presente, req.params.id, req.params.allievoId]
+    );
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 
