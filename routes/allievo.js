@@ -77,11 +77,23 @@ router.get('/allievo/lezioni', ...requireRole('allievo'), async (req, res) => {
          l.id,
          TO_CHAR(l.data, 'YYYY-MM-DD') AS data,
          l.ora_inizio, l.ora_fine, l.aula, l.stato, l.motivazione,
-         i.nome AS nome_insegnante, i.cognome AS cognome_insegnante
+         i.nome AS nome_insegnante, i.cognome AS cognome_insegnante,
+         l.tipo, l.nome_gruppo
        FROM lezioni l
        LEFT JOIN insegnanti i ON l.id_insegnante = i.id
        WHERE l.id_allievo = $1 ${statoCondition}
-       ORDER BY l.data DESC, l.ora_inizio DESC`,
+       UNION
+       SELECT
+         l.id,
+         TO_CHAR(l.data, 'YYYY-MM-DD') AS data,
+         l.ora_inizio, l.ora_fine, l.aula, l.stato, l.motivazione,
+         i.nome AS nome_insegnante, i.cognome AS cognome_insegnante,
+         l.tipo, l.nome_gruppo
+       FROM lezioni l
+       JOIN lezioni_partecipanti lp ON lp.lezione_id = l.id AND lp.allievo_id = $1
+       LEFT JOIN insegnanti i ON l.id_insegnante = i.id
+       WHERE l.tipo = 'collettiva' ${statoCondition}
+       ORDER BY data DESC, ora_inizio DESC`,
       [id]
     );
 
