@@ -85,8 +85,24 @@ pool.query(`
   )
 `).catch(() => {});
 
-app.listen(PORT, () => {
-  console.log(`Server AMA in ascolto sulla porta ${PORT}`);
-  avviaCron();
-  avviaQontoCron();
+async function avviaMigrazioni() {
+  const migrazioni = [
+    `ALTER TABLE lezioni            ADD COLUMN IF NOT EXISTS anno_accademico TEXT`,
+    `ALTER TABLE pagamenti_mensili  ADD COLUMN IF NOT EXISTS anno_accademico TEXT`,
+    `ALTER TABLE quote_associative  ADD COLUMN IF NOT EXISTS anno_accademico TEXT`,
+    `ALTER TABLE gruppi             ADD COLUMN IF NOT EXISTS anno_accademico TEXT`,
+    `ALTER TABLE iscrizioni         ADD COLUMN IF NOT EXISTS anno_accademico TEXT`,
+  ];
+  for (const sql of migrazioni) {
+    try { await pool.query(sql); } catch (e) { console.error('Migrazione fallita:', sql, e.message); }
+  }
+  console.log('Migrazioni anno_accademico completate.');
+}
+
+avviaMigrazioni().then(() => {
+  app.listen(PORT, () => {
+    console.log(`Server AMA in ascolto sulla porta ${PORT}`);
+    avviaCron();
+    avviaQontoCron();
+  });
 });
