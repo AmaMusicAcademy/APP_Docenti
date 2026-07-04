@@ -140,7 +140,7 @@ function generatePDF(isc, { withPresidente = false } = {}) {
     riga('Indirizzo:', `${isc.indirizzo || '—'}, ${isc.cap || ''} ${isc.citta || ''} (${isc.provincia || ''})`);
     riga('Telefono:', isc.telefono);
     riga('Email:', isc.email);
-    riga('Strumento richiesto:', isc.strumento);
+    riga('Materie richieste:', isc.strumento);
 
     // ── Genitore ──
     if (isc.minore) {
@@ -211,7 +211,7 @@ async function inviaEmailDirezione(isc, pdfBuffer) {
     subject: `Nuova domanda di iscrizione — ${isc.nome} ${isc.cognome}`,
     html: `
       <p>È stata ricevuta una nuova domanda di iscrizione da <strong>${isc.nome} ${isc.cognome}</strong>.</p>
-      <p>Strumento richiesto: <strong>${isc.strumento || '—'}</strong></p>
+      <p>Materie richieste: <strong>${isc.strumento || '—'}</strong></p>
       <p>Email: ${isc.email} — Telefono: ${isc.telefono}</p>
       <p>In allegato il modulo completo. Accedi all'app amministratore per accettare o rifiutare la domanda.</p>
     `,
@@ -250,7 +250,7 @@ async function inviaEmailAllievo(isc, pdfBuffer, tempPassword = null) {
 router.post('/iscrizione', async (req, res) => {
   const {
     nome, cognome, codice_fiscale, data_nascita, luogo_nascita,
-    indirizzo, cap, citta, provincia, telefono, email, strumento, note,
+    indirizzo, cap, citta, provincia, telefono, email, materie, note,
     minore,
     genitore_nome, genitore_cognome, genitore_cf, genitore_data_nascita,
     genitore_luogo_nascita, genitore_indirizzo, genitore_telefono, genitore_email,
@@ -283,7 +283,8 @@ router.post('/iscrizione', async (req, res) => {
       ) RETURNING *
     `, [
       nome, cognome, codice_fiscale, data_nascita || null, luogo_nascita,
-      indirizzo, cap, citta, provincia, telefono, email, strumento, note,
+      indirizzo, cap, citta, provincia, telefono, email,
+      Array.isArray(materie) ? materie.join(', ') : (materie || ''), note,
       !!minore,
       genitore_nome, genitore_cognome, genitore_cf, genitore_data_nascita || null,
       genitore_luogo_nascita, genitore_indirizzo, genitore_telefono, genitore_email,
