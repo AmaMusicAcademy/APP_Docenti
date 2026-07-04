@@ -303,7 +303,7 @@ router.get('/allievo/riepilogo-anno', ...requireRole('allievo'), async (req, res
   const y = now.getFullYear();
   const annoInizio = m >= 9 ? y : y - 1;
   const inizio = `${annoInizio}-09-01`;
-  const fine   = `${annoInizio + 1}-06-30`;
+  const fine   = `${annoInizio + 1}-08-31`;
   try {
     const { rows } = await pool.query(
       `SELECT
