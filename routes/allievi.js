@@ -220,7 +220,13 @@ router.get('/allievi/:id/conteggio-lezioni', async (req, res) => {
   const where = conditions.length ? ` AND ${conditions.join(' AND ')}` : '';
   try {
     const { rows } = await pool.query(
-      `SELECT stato, riprogrammata, COUNT(*) FROM lezioni WHERE id_allievo = $1${where} GROUP BY stato, riprogrammata`,
+      `SELECT stato, riprogrammata, COUNT(*) FROM (
+         SELECT stato, riprogrammata FROM lezioni WHERE id_allievo = $1${where}
+         UNION ALL
+         SELECT l.stato, l.riprogrammata FROM lezioni l
+         JOIN lezioni_partecipanti lp ON lp.lezione_id = l.id AND lp.allievo_id = $1
+         WHERE l.tipo = 'collettiva'${where.replace(/data/g, 'l.data')}
+       ) sub GROUP BY stato, riprogrammata`,
       params
     );
     const result = { svolte: 0, annullate: 0, rimandate: 0, riprogrammate: 0 };
@@ -253,12 +259,20 @@ router.get('/allievi/:id/lezioni-per-stato', authenticateToken, async (req, res)
 
     const { rows } = await pool.query(
       `SELECT l.id, TO_CHAR(l.data,'YYYY-MM-DD') AS data, l.ora_inizio, l.ora_fine,
-              l.stato, l.aula, l.motivazione,
+              l.stato, l.aula, l.motivazione, l.tipo, l.nome_gruppo,
               i.nome AS nome_insegnante, i.cognome AS cognome_insegnante
        FROM lezioni l
        LEFT JOIN insegnanti i ON l.id_insegnante = i.id
        WHERE l.id_allievo = $1 AND ${whereStato}
-       ORDER BY l.data DESC, l.ora_inizio DESC`,
+       UNION
+       SELECT l.id, TO_CHAR(l.data,'YYYY-MM-DD') AS data, l.ora_inizio, l.ora_fine,
+              l.stato, l.aula, l.motivazione, l.tipo, l.nome_gruppo,
+              i.nome AS nome_insegnante, i.cognome AS cognome_insegnante
+       FROM lezioni l
+       JOIN lezioni_partecipanti lp ON lp.lezione_id = l.id AND lp.allievo_id = $1
+       LEFT JOIN insegnanti i ON l.id_insegnante = i.id
+       WHERE l.tipo = 'collettiva' AND ${whereStato}
+       ORDER BY data DESC, ora_inizio DESC`,
       [id]
     );
     res.json(rows);
