@@ -66,9 +66,11 @@ router.get('/allievo/lezioni', ...requireRole('allievo'), async (req, res) => {
   const oggi = new Date().toISOString().slice(0, 10);
 
   if (stato === 'future') {
-    statoCondition = `AND (l.data > '${oggi}' OR (l.data = '${oggi}' AND l.stato = 'futura'))`;
+    // lezioni future: data futura, oppure oggi ma ancora da svolgere (appuntamentata)
+    statoCondition = `AND (l.data > '${oggi}' OR (l.data = '${oggi}' AND l.stato = 'appuntamentata'))`;
   } else if (stato === 'passate') {
-    statoCondition = `AND l.data < '${oggi}'`;
+    // lezioni passate: date precedenti, oppure oggi ma già completate/annullate/rimandate
+    statoCondition = `AND (l.data < '${oggi}' OR (l.data = '${oggi}' AND l.stato != 'appuntamentata'))`;
   }
 
   try {
@@ -305,12 +307,17 @@ router.get('/allievo/riepilogo-anno', ...requireRole('allievo'), async (req, res
   try {
     const { rows } = await pool.query(
       `SELECT
-         COUNT(*) FILTER (WHERE stato = 'svolta')    AS svolte,
-         COUNT(*) FILTER (WHERE stato = 'rimandata') AS rimandate,
-         COUNT(*) FILTER (WHERE stato = 'annullata') AS annullate,
-         COUNT(*) FILTER (WHERE stato = 'futura')    AS future
-       FROM lezioni
-       WHERE id_allievo = $1 AND data BETWEEN $2 AND $3`,
+         COUNT(*) FILTER (WHERE stato = 'svolta')         AS svolte,
+         COUNT(*) FILTER (WHERE stato = 'rimandata')      AS rimandate,
+         COUNT(*) FILTER (WHERE stato = 'annullata')      AS annullate,
+         COUNT(*) FILTER (WHERE stato = 'appuntamentata') AS future
+       FROM (
+         SELECT stato FROM lezioni WHERE id_allievo = $1 AND data BETWEEN $2 AND $3
+         UNION ALL
+         SELECT l.stato FROM lezioni l
+         JOIN lezioni_partecipanti lp ON lp.lezione_id = l.id AND lp.allievo_id = $1
+         WHERE l.tipo = 'collettiva' AND l.data BETWEEN $2 AND $3
+       ) sub`,
       [id, inizio, fine]
     );
     res.json({ ...rows[0], inizio, fine, annoInizio, annoFine: annoInizio + 1 });
