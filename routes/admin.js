@@ -3,6 +3,7 @@ const bcrypt = require('bcrypt');
 const { pool } = require('../db');
 const { requireRole } = require('../Middleware/auth');
 const { genUsernameFrom } = require('../utils/helpers');
+const { getAnnoAccademico } = require('../utils/annoAccademico');
 
 const router = express.Router();
 
@@ -80,6 +81,7 @@ router.post('/admin/allievi/:id/credenziali', ...requireRole('admin'), async (re
 // GET /api/admin/dashboard — KPI sintetici
 router.get('/admin/dashboard', ...requireRole('admin'), async (_req, res) => {
   try {
+    const annoCorrente = getAnnoAccademico();
     const [lezioniSettimana, pagamentiMancanti, allieviAttivi, insegnantiCount, iscrizioniAttesa, daRiprogrammare] = await Promise.all([
       // Lezioni questa settimana
       pool.query(`
@@ -87,6 +89,7 @@ router.get('/admin/dashboard', ...requireRole('admin'), async (_req, res) => {
         WHERE data >= date_trunc('week', CURRENT_DATE)
           AND data < date_trunc('week', CURRENT_DATE) + INTERVAL '7 days'
           AND stato NOT IN ('annullata')
+          AND (anno_accademico IS NULL OR anno_accademico = '${annoCorrente}')
       `),
       // Allievi con quota mensile mancante per il mese corrente
       pool.query(`
@@ -107,7 +110,7 @@ router.get('/admin/dashboard', ...requireRole('admin'), async (_req, res) => {
       // Iscrizioni in attesa
       pool.query(`SELECT COUNT(*) FROM iscrizioni WHERE stato='in_attesa'`),
       // Lezioni rimandate non ancora riprogrammate
-      pool.query(`SELECT COUNT(*) FROM lezioni WHERE stato='rimandata' AND riprogrammata = FALSE`),
+      pool.query(`SELECT COUNT(*) FROM lezioni WHERE stato='rimandata' AND riprogrammata = FALSE AND (anno_accademico IS NULL OR anno_accademico = '${annoCorrente}')`),
     ]);
 
     res.json({
@@ -126,6 +129,7 @@ router.get('/admin/dashboard', ...requireRole('admin'), async (_req, res) => {
 
 // GET /api/admin/lezioni-da-riprogrammare
 router.get('/admin/lezioni-da-riprogrammare', ...requireRole('admin'), async (_req, res) => {
+  const annoCorrente = getAnnoAccademico();
   try {
     const { rows } = await pool.query(`
       SELECT l.id, TO_CHAR(l.data,'YYYY-MM-DD') AS data, l.ora_inizio, l.ora_fine,
@@ -136,6 +140,7 @@ router.get('/admin/lezioni-da-riprogrammare', ...requireRole('admin'), async (_r
       LEFT JOIN allievi a ON l.id_allievo = a.id
       LEFT JOIN insegnanti i ON l.id_insegnante = i.id
       WHERE l.stato = 'rimandata' AND l.riprogrammata = FALSE
+        AND (l.anno_accademico IS NULL OR l.anno_accademico = '${annoCorrente}')
       ORDER BY l.data DESC, l.ora_inizio DESC
     `);
     res.json(rows);

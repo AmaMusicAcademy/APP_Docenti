@@ -5,6 +5,7 @@ const crypto      = require('crypto');
 const bcrypt      = require('bcrypt');
 const { pool }    = require('../db');
 const { requireRole, authenticateToken } = require('../Middleware/auth');
+const { getAnnoAccademico } = require('../utils/annoAccademico');
 
 const router = express.Router();
 
@@ -293,10 +294,10 @@ router.post('/iscrizione', async (req, res) => {
         genitore_luogo_nascita, genitore_indirizzo, genitore_telefono, genitore_email,
         acc_tesseramento, acc_regolamento, acc_privacy, acc_immagini,
         doc_allievo_fronte, doc_allievo_retro, doc_genitore_fronte, doc_genitore_retro,
-        firma_allievo, token_download
+        firma_allievo, token_download, anno_accademico
       ) VALUES (
         $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,
-        $21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32
+        $21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33
       ) RETURNING *
     `, [
       nome, cognome, codice_fiscale, data_nascita || null, luogo_nascita,
@@ -307,7 +308,7 @@ router.post('/iscrizione', async (req, res) => {
       genitore_luogo_nascita, genitore_indirizzo, genitore_telefono, genitore_email,
       !!acc_tesseramento, !!acc_regolamento, !!acc_privacy, !!acc_immagini,
       doc_allievo_fronte, doc_allievo_retro, doc_genitore_fronte, doc_genitore_retro,
-      firma_allievo, token,
+      firma_allievo, token, getAnnoAccademico(),
     ]);
 
     const isc = rows[0];

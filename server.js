@@ -44,6 +44,7 @@ app.use('/api', require('./routes/giorni-chiusura'));
 app.use('/api', require('./routes/iscrizioni'));
 app.use('/api', require('./routes/qonto').router);
 app.use('/api', require('./routes/gruppi'));
+app.use('/api', require('./routes/anno-accademico'));
 
 // ----------------------
 // Health + debug routes

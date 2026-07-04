@@ -3,6 +3,7 @@ const bcrypt = require('bcrypt');
 const { pool } = require('../db');
 const { authenticateToken, requireRole } = require('../Middleware/auth');
 const { genUsernameFrom } = require('../utils/helpers');
+const { getAnnoAccademico } = require('../utils/annoAccademico');
 
 const router = express.Router();
 
@@ -125,6 +126,7 @@ router.get('/insegnanti/:id/lezioni', authenticateToken, async (req, res) => {
     return res.status(403).json({ error: 'Accesso non autorizzato' });
   }
   try {
+    const annoCorrente = getAnnoAccademico();
     const { rows } = await pool.query(
       `SELECT lezioni.*,
               COALESCE(lezioni.tipo, 'individuale') AS tipo,
@@ -135,8 +137,9 @@ router.get('/insegnanti/:id/lezioni', authenticateToken, async (req, res) => {
        LEFT JOIN allievi ON lezioni.id_allievo = allievi.id
        LEFT JOIN gruppi g ON g.id = lezioni.gruppo_id
        WHERE lezioni.id_insegnante = $1
+         AND (lezioni.anno_accademico IS NULL OR lezioni.anno_accademico = $2)
        ORDER BY lezioni.data DESC, lezioni.ora_inizio DESC`,
-      [id]
+      [id, annoCorrente]
     );
     res.json(rows);
   } catch (err) {

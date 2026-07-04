@@ -59,6 +59,14 @@ router.get('/setup/migrate', async (_req, res) => {
     await pool.query(`ALTER TABLE lezioni ADD COLUMN IF NOT EXISTS old_schedules JSONB DEFAULT '[]'::jsonb`);
     steps.push('lezioni: storico_programmazioni e old_schedules presenti');
 
+    // 7. Anno accademico — colonna su tutte le tabelle rilevanti
+    await pool.query(`ALTER TABLE lezioni ADD COLUMN IF NOT EXISTS anno_accademico TEXT`);
+    await pool.query(`ALTER TABLE pagamenti_mensili ADD COLUMN IF NOT EXISTS anno_accademico TEXT`);
+    await pool.query(`ALTER TABLE quote_associative ADD COLUMN IF NOT EXISTS anno_accademico TEXT`);
+    await pool.query(`ALTER TABLE gruppi ADD COLUMN IF NOT EXISTS anno_accademico TEXT`);
+    await pool.query(`ALTER TABLE iscrizioni ADD COLUMN IF NOT EXISTS anno_accademico TEXT`);
+    steps.push('anno_accademico aggiunto a lezioni, pagamenti_mensili, quote_associative, gruppi, iscrizioni');
+
     // 6. Tabelle legacy (safe)
     await pool.query(`
       CREATE TABLE IF NOT EXISTS pagamenti_mensili (

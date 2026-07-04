@@ -1,6 +1,7 @@
 const express = require('express');
 const { pool } = require('../db');
 const { authenticateToken, requireRole } = require('../Middleware/auth');
+const { getAnnoAccademico } = require('../utils/annoAccademico');
 
 const router = express.Router();
 
@@ -213,11 +214,12 @@ router.patch('/allievi/:id/stato', ...requireRole('admin'), async (req, res) => 
 router.get('/allievi/:id/conteggio-lezioni', async (req, res) => {
   const { id } = req.params;
   const { start, end } = req.query;
+  const annoCorrente = getAnnoAccademico();
   const params = [id];
-  const conditions = [];
+  const conditions = [`(anno_accademico IS NULL OR anno_accademico = '${annoCorrente}')`];
   if (start) { conditions.push(`data >= $${params.length + 1}`); params.push(start); }
   if (end)   { conditions.push(`data <= $${params.length + 1}`); params.push(end); }
-  const where = conditions.length ? ` AND ${conditions.join(' AND ')}` : '';
+  const where = ` AND ${conditions.join(' AND ')}`;
   try {
     const { rows } = await pool.query(
       `SELECT stato, riprogrammata, COUNT(*) FROM (
@@ -225,7 +227,7 @@ router.get('/allievi/:id/conteggio-lezioni', async (req, res) => {
          UNION ALL
          SELECT l.stato, l.riprogrammata FROM lezioni l
          JOIN lezioni_partecipanti lp ON lp.lezione_id = l.id AND lp.allievo_id = $1
-         WHERE l.tipo = 'collettiva'${where.replace(/data/g, 'l.data')}
+         WHERE l.tipo = 'collettiva'${where.replace(/data/g, 'l.data').replace(/anno_accademico/g, 'l.anno_accademico')}
        ) sub GROUP BY stato, riprogrammata`,
       params
     );
@@ -257,6 +259,7 @@ router.get('/allievi/:id/lezioni-per-stato', authenticateToken, async (req, res)
     else if (stato === 'rimandata') whereStato = `l.stato = 'rimandata' AND l.riprogrammata = FALSE`;
     else whereStato = '1=1';
 
+    const annoCorrente = getAnnoAccademico();
     const { rows } = await pool.query(
       `SELECT l.id, TO_CHAR(l.data,'YYYY-MM-DD') AS data, l.ora_inizio, l.ora_fine,
               l.stato, l.aula, l.motivazione, l.tipo, l.nome_gruppo,
@@ -264,6 +267,7 @@ router.get('/allievi/:id/lezioni-per-stato', authenticateToken, async (req, res)
        FROM lezioni l
        LEFT JOIN insegnanti i ON l.id_insegnante = i.id
        WHERE l.id_allievo = $1 AND ${whereStato}
+         AND (l.anno_accademico IS NULL OR l.anno_accademico = $2)
        UNION
        SELECT l.id, TO_CHAR(l.data,'YYYY-MM-DD') AS data, l.ora_inizio, l.ora_fine,
               l.stato, l.aula, l.motivazione, l.tipo, l.nome_gruppo,
@@ -272,8 +276,9 @@ router.get('/allievi/:id/lezioni-per-stato', authenticateToken, async (req, res)
        JOIN lezioni_partecipanti lp ON lp.lezione_id = l.id AND lp.allievo_id = $1
        LEFT JOIN insegnanti i ON l.id_insegnante = i.id
        WHERE l.tipo = 'collettiva' AND ${whereStato}
+         AND (l.anno_accademico IS NULL OR l.anno_accademico = $2)
        ORDER BY data DESC, ora_inizio DESC`,
-      [id]
+      [id, annoCorrente]
     );
     res.json(rows);
   } catch (err) {
@@ -302,11 +307,11 @@ router.post('/allievi/:id/pagamenti', async (req, res) => {
   const { anno, mese } = req.body;
   try {
     const { rows } = await pool.query(
-      `INSERT INTO pagamenti_mensili (allievo_id, anno, mese)
-       VALUES ($1, $2, $3)
+      `INSERT INTO pagamenti_mensili (allievo_id, anno, mese, anno_accademico)
+       VALUES ($1, $2, $3, $4)
        ON CONFLICT (allievo_id, anno, mese) DO NOTHING
        RETURNING *`,
-      [req.params.id, anno, mese]
+      [req.params.id, anno, mese, getAnnoAccademico()]
     );
     res.status(201).json(rows[0] || { message: 'Pagamento già registrato' });
   } catch (err) {
