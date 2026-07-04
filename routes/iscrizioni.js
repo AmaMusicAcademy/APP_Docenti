@@ -8,6 +8,23 @@ const { requireRole, authenticateToken } = require('../Middleware/auth');
 
 const router = express.Router();
 
+// Prezzi materie per calcolo quota mensile automatica
+const PREZZI_MATERIE = {
+  'Canto 45min': 80, 'Canto 1h': 100,
+  'Pianoforte 45min': 80, 'Pianoforte 1h': 100,
+  'Violino 45min': 80, 'Violino 1h': 100,
+  'Chitarra 45min': 80, 'Chitarra 1h': 100,
+  'Batteria 45min': 80, 'Batteria 1h': 100,
+  'Coro': 30, 'Band': 30, 'Teoria e Solfeggio': 30,
+};
+
+function calcolaQuotaMensile(strumentoCSV) {
+  if (!strumentoCSV) return 0;
+  return strumentoCSV.split(',')
+    .map(s => s.trim())
+    .reduce((sum, nome) => sum + (PREZZI_MATERIE[nome] || 0), 0);
+}
+
 // ── Tabella iscrizioni ─────────────────────────────────────────────────────
 pool.query(`
   CREATE TABLE IF NOT EXISTS iscrizioni (
@@ -352,8 +369,9 @@ router.patch('/admin/iscrizioni/:id/accetta', authenticateToken, async (req, res
       // (email/telefono condivisi sono ammessi, es. fratelli minorenni con contatti del genitore)
       const { rows: ar } = await pool.query(
         `INSERT INTO allievi (nome, cognome, email, telefono, strumento, data_nascita, note, data_iscrizione, quota_mensile)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,NOW(),0) RETURNING id`,
-        [isc.nome, isc.cognome, isc.email, isc.telefono, isc.strumento, isc.data_nascita || null, isc.note]
+         VALUES ($1,$2,$3,$4,$5,$6,$7,NOW(),$8) RETURNING id`,
+        [isc.nome, isc.cognome, isc.email, isc.telefono, isc.strumento, isc.data_nascita || null, isc.note,
+         calcolaQuotaMensile(isc.strumento)]
       );
       allievoId = ar[0].id;
 
