@@ -90,20 +90,17 @@ router.get('/clima/dispositivi', authenticateToken, requireSwitchbot, async (req
 router.get('/clima/stato/:deviceId', authenticateToken, requireSwitchbot, async (req, res) => {
   const { deviceId } = req.params;
 
-  // Restrizione insegnanti: deve avere lezione in corso o entro 30 min nell'aula del dispositivo
+  // Restrizione insegnanti: lezione in corso (±30 min) — orario italiano via PostgreSQL
   if (req.user.ruolo === 'insegnante') {
-    const now = new Date();
-    const hhmm = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
-    const oggi = now.toISOString().slice(0, 10);
     const { rows } = await pool.query(`
       SELECT l.id FROM lezioni l
       WHERE l.id_insegnante = $1
-        AND l.data = $2
-        AND l.ora_inizio <= $3::time + interval '30 minutes'
-        AND l.ora_fine   >= $3::time - interval '30 minutes'
+        AND l.data = (NOW() AT TIME ZONE 'Europe/Rome')::date
+        AND l.ora_inizio <= (NOW() AT TIME ZONE 'Europe/Rome')::time + interval '30 minutes'
+        AND l.ora_fine   >= (NOW() AT TIME ZONE 'Europe/Rome')::time - interval '30 minutes'
         AND l.stato NOT IN ('annullata')
       LIMIT 1
-    `, [req.user.insegnanteId, oggi, hhmm]);
+    `, [req.user.insegnanteId]);
     if (rows.length === 0) {
       return res.status(403).json({ error: 'Controllo disponibile solo durante le ore di lezione' });
     }
@@ -129,18 +126,15 @@ router.post('/clima/comando/:deviceId', authenticateToken, requireSwitchbot, asy
 
   // Restrizione insegnanti
   if (req.user.ruolo === 'insegnante') {
-    const now = new Date();
-    const hhmm = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
-    const oggi = now.toISOString().slice(0, 10);
     const { rows } = await pool.query(`
       SELECT l.id FROM lezioni l
       WHERE l.id_insegnante = $1
-        AND l.data = $2
-        AND l.ora_inizio <= $3::time + interval '30 minutes'
-        AND l.ora_fine   >= $3::time - interval '30 minutes'
+        AND l.data = (NOW() AT TIME ZONE 'Europe/Rome')::date
+        AND l.ora_inizio <= (NOW() AT TIME ZONE 'Europe/Rome')::time + interval '30 minutes'
+        AND l.ora_fine   >= (NOW() AT TIME ZONE 'Europe/Rome')::time - interval '30 minutes'
         AND l.stato NOT IN ('annullata')
       LIMIT 1
-    `, [req.user.insegnanteId, oggi, hhmm]);
+    `, [req.user.insegnanteId]);
     if (rows.length === 0) {
       return res.status(403).json({ error: 'Controllo disponibile solo durante le ore di lezione' });
     }
