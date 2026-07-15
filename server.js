@@ -45,6 +45,7 @@ app.use('/api', require('./routes/iscrizioni'));
 app.use('/api', require('./routes/qonto').router);
 app.use('/api', require('./routes/gruppi'));
 app.use('/api', require('./routes/anno-accademico'));
+app.use('/api', require('./routes/clima'));
 
 // ----------------------
 // Health + debug routes
