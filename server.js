@@ -45,7 +45,8 @@ app.use('/api', require('./routes/iscrizioni'));
 app.use('/api', require('./routes/qonto').router);
 app.use('/api', require('./routes/gruppi'));
 app.use('/api', require('./routes/anno-accademico'));
-app.use('/api', require('./routes/clima'));
+const { router: climaRouter, avviaControlloClima } = require('./routes/clima');
+app.use('/api', climaRouter);
 
 // ----------------------
 // Health + debug routes
@@ -77,6 +78,7 @@ app.get('/api/_routes', (_req, res) => {
 const { pool } = require('./db');
 const { avviaCron } = require('./cron/notifiche-pagamento');
 const { avviaQontoCron } = require('./cron/qonto-sync');
+const schedule = require('node-schedule');
 
 pool.query(`
   CREATE TABLE IF NOT EXISTS cron_log (
@@ -105,5 +107,8 @@ avviaMigrazioni().then(() => {
     console.log(`Server AMA in ascolto sulla porta ${PORT}`);
     avviaCron();
     avviaQontoCron();
+    // Controllo clima ogni 5 minuti
+    schedule.scheduleJob('*/5 * * * *', () => avviaControlloClima().catch(console.error));
+    console.log('Cron controllo clima avviato (ogni 5 minuti)');
   });
 });
