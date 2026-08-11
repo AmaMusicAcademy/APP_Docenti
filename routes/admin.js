@@ -92,10 +92,19 @@ router.get('/admin/dashboard', ...requireRole('admin'), async (_req, res) => {
           AND anno_accademico IS NULL
       `),
       // Allievi con quota mensile mancante per il mese corrente
+      // (solo se iscritti entro questo mese; i pagamenti partono da settembre)
       pool.query(`
         SELECT COUNT(DISTINCT a.id) FROM allievi a
         WHERE a.quota_mensile > 0
           AND (a.attivo IS NULL OR a.attivo = TRUE)
+          AND GREATEST(
+            DATE_TRUNC('month', COALESCE(a.data_iscrizione, '2000-01-01')::date),
+            MAKE_DATE(
+              CASE WHEN EXTRACT(MONTH FROM CURRENT_DATE) >= 9
+                   THEN EXTRACT(YEAR FROM CURRENT_DATE)::int
+                   ELSE EXTRACT(YEAR FROM CURRENT_DATE)::int - 1 END,
+              9, 1)
+          ) <= DATE_TRUNC('month', CURRENT_DATE)
           AND NOT EXISTS (
             SELECT 1 FROM pagamenti_mensili p
             WHERE p.allievo_id = a.id
@@ -165,6 +174,10 @@ router.get('/admin/pagamenti-overview', ...requireRole('admin'), async (req, res
        LEFT JOIN pagamenti_mensili p
          ON p.allievo_id = a.id AND p.anno = $1 AND p.mese = $2
        WHERE a.quota_mensile > 0 AND (a.attivo IS DISTINCT FROM FALSE)
+         AND GREATEST(
+           DATE_TRUNC('month', COALESCE(a.data_iscrizione, '2000-01-01')::date),
+           MAKE_DATE(CASE WHEN $2 >= 9 THEN $1 ELSE $1 - 1 END, 9, 1)
+         ) <= MAKE_DATE($1, $2, 1)
        ORDER BY pagato ASC, a.cognome, a.nome`,
       [anno, mese]
     );
