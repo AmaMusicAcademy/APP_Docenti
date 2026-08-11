@@ -108,7 +108,7 @@ router.get('/admin/dashboard', ...requireRole('admin'), async (_req, res) => {
       // Insegnanti
       pool.query(`SELECT COUNT(*) FROM insegnanti`),
       // Iscrizioni in attesa
-      pool.query(`SELECT COUNT(*) FROM iscrizioni WHERE stato='in_attesa'`),
+      pool.query(`SELECT COUNT(*) FROM iscrizioni WHERE stato='in_attesa' AND anno_accademico IS NULL`),
       // Lezioni rimandate non ancora riprogrammate
       pool.query(`SELECT COUNT(*) FROM lezioni WHERE stato='rimandata' AND riprogrammata = FALSE AND anno_accademico IS NULL`),
     ]);

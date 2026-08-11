@@ -330,7 +330,7 @@ router.get('/admin/iscrizioni', authenticateToken, async (req, res) => {
     const { stato = 'in_attesa' } = req.query;
     const { rows } = await pool.query(
       `SELECT id, nome, cognome, email, telefono, strumento, minore, stato, created_at, accettata_il
-       FROM iscrizioni WHERE stato=$1 ORDER BY created_at DESC`,
+       FROM iscrizioni WHERE stato=$1 AND anno_accademico IS NULL ORDER BY created_at DESC`,
       [stato]
     );
     res.json(rows);
