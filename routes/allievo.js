@@ -298,12 +298,9 @@ router.patch('/allievo/profilo', ...requireRole('allievo'), async (req, res) => 
 router.get('/allievo/riepilogo-anno', ...requireRole('allievo'), async (req, res) => {
   const id = req.user.allievoId;
   const now = new Date();
-  // Anno accademico: 1 set anno-1 → 30 giu anno se siamo gen-giu, altrimenti 1 set anno → 30 giu anno+1
   const m = now.getMonth() + 1;
   const y = now.getFullYear();
   const annoInizio = m >= 9 ? y : y - 1;
-  const inizio = `${annoInizio}-09-01`;
-  const fine   = `${annoInizio + 1}-08-31`;
   try {
     const { rows } = await pool.query(
       `SELECT
@@ -312,15 +309,15 @@ router.get('/allievo/riepilogo-anno', ...requireRole('allievo'), async (req, res
          COUNT(*) FILTER (WHERE stato = 'annullata')      AS annullate,
          COUNT(*) FILTER (WHERE stato = 'appuntamentata') AS future
        FROM (
-         SELECT stato FROM lezioni WHERE id_allievo = $1 AND data BETWEEN $2 AND $3
+         SELECT stato FROM lezioni WHERE id_allievo = $1 AND anno_accademico IS NULL
          UNION ALL
          SELECT l.stato FROM lezioni l
          JOIN lezioni_partecipanti lp ON lp.lezione_id = l.id AND lp.allievo_id = $1
-         WHERE l.tipo = 'collettiva' AND l.data BETWEEN $2 AND $3
+         WHERE l.tipo = 'collettiva' AND l.anno_accademico IS NULL
        ) sub`,
-      [id, inizio, fine]
+      [id]
     );
-    res.json({ ...rows[0], inizio, fine, annoInizio, annoFine: annoInizio + 1 });
+    res.json({ ...rows[0], annoInizio, annoFine: annoInizio + 1 });
   } catch (err) { console.error(err); res.status(500).json({ error: 'Errore' }); }
 });
 
@@ -340,11 +337,18 @@ router.get('/allievo/pagamenti-arretrati', ...requireRole('allievo'), async (req
     const pagatiSet = new Set(pagati.map(p=>`${p.anno}-${p.mese}`));
 
     const now = new Date();
-    const start = data_iscrizione ? new Date(`${String(data_iscrizione).slice(0,10)}T00:00:00Z`) : now;
+    const nowM = now.getUTCMonth() + 1;
+    const nowY = now.getUTCFullYear();
+    // Settembre dell'anno accademico corrente
+    const annoAccInizio = nowM >= 9 ? nowY : nowY - 1;
+    const settembreAA = new Date(Date.UTC(annoAccInizio, 8, 1)); // mese 8 = settembre
+    // I pagamenti partono dal massimo tra settembre AA e data_iscrizione
+    const dataIsc = data_iscrizione ? new Date(`${String(data_iscrizione).slice(0,10)}T00:00:00Z`) : settembreAA;
+    const start = dataIsc > settembreAA ? dataIsc : settembreAA;
     const arretrati = [];
     let cur = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), 1));
-    // fino al mese precedente (il corrente è ancora in corso)
-    const limiteMese = new Date(Date.UTC(now.getFullYear(), now.getMonth(), 1));
+    // fino al mese corrente incluso
+    const limiteMese = new Date(Date.UTC(nowY, nowM - 1, 1));
 
     while (cur < limiteMese) {
       const a = cur.getUTCFullYear(), m = cur.getUTCMonth() + 1;
