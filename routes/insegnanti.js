@@ -109,7 +109,7 @@ router.get('/insegnanti/:id/allievi', async (req, res) => {
       `SELECT a.id, a.nome, a.cognome
        FROM allievi a
        JOIN allievi_insegnanti ai ON a.id = ai.allievo_id
-       WHERE ai.insegnante_id = $1`,
+       WHERE ai.insegnante_id = $1 AND a.attivo IS DISTINCT FROM FALSE`,
       [id]
     );
     res.json(rows);

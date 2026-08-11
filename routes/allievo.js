@@ -83,7 +83,7 @@ router.get('/allievo/lezioni', ...requireRole('allievo'), async (req, res) => {
          l.tipo, l.nome_gruppo
        FROM lezioni l
        LEFT JOIN insegnanti i ON l.id_insegnante = i.id
-       WHERE l.id_allievo = $1 ${statoCondition}
+       WHERE l.id_allievo = $1 AND l.anno_accademico IS NULL ${statoCondition}
        UNION
        SELECT
          l.id,
@@ -94,7 +94,7 @@ router.get('/allievo/lezioni', ...requireRole('allievo'), async (req, res) => {
        FROM lezioni l
        JOIN lezioni_partecipanti lp ON lp.lezione_id = l.id AND lp.allievo_id = $1
        LEFT JOIN insegnanti i ON l.id_insegnante = i.id
-       WHERE l.tipo = 'collettiva' ${statoCondition}
+       WHERE l.tipo = 'collettiva' AND l.anno_accademico IS NULL ${statoCondition}
        ORDER BY data DESC, ora_inizio DESC`,
       [id]
     );
