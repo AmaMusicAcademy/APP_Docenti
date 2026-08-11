@@ -214,9 +214,8 @@ router.patch('/allievi/:id/stato', ...requireRole('admin'), async (req, res) => 
 router.get('/allievi/:id/conteggio-lezioni', async (req, res) => {
   const { id } = req.params;
   const { start, end } = req.query;
-  const annoCorrente = getAnnoAccademico();
   const params = [id];
-  const conditions = [`(anno_accademico IS NULL OR anno_accademico = '${annoCorrente}')`];
+  const conditions = [`anno_accademico IS NULL`];
   if (start) { conditions.push(`data >= $${params.length + 1}`); params.push(start); }
   if (end)   { conditions.push(`data <= $${params.length + 1}`); params.push(end); }
   const where = ` AND ${conditions.join(' AND ')}`;
@@ -259,7 +258,6 @@ router.get('/allievi/:id/lezioni-per-stato', authenticateToken, async (req, res)
     else if (stato === 'rimandata') whereStato = `l.stato = 'rimandata' AND l.riprogrammata = FALSE`;
     else whereStato = '1=1';
 
-    const annoCorrente = getAnnoAccademico();
     const { rows } = await pool.query(
       `SELECT l.id, TO_CHAR(l.data,'YYYY-MM-DD') AS data, l.ora_inizio, l.ora_fine,
               l.stato, l.aula, l.motivazione, l.tipo, l.nome_gruppo,
@@ -267,7 +265,7 @@ router.get('/allievi/:id/lezioni-per-stato', authenticateToken, async (req, res)
        FROM lezioni l
        LEFT JOIN insegnanti i ON l.id_insegnante = i.id
        WHERE l.id_allievo = $1 AND ${whereStato}
-         AND (l.anno_accademico IS NULL OR l.anno_accademico = $2)
+         AND l.anno_accademico IS NULL
        UNION
        SELECT l.id, TO_CHAR(l.data,'YYYY-MM-DD') AS data, l.ora_inizio, l.ora_fine,
               l.stato, l.aula, l.motivazione, l.tipo, l.nome_gruppo,
@@ -276,9 +274,9 @@ router.get('/allievi/:id/lezioni-per-stato', authenticateToken, async (req, res)
        JOIN lezioni_partecipanti lp ON lp.lezione_id = l.id AND lp.allievo_id = $1
        LEFT JOIN insegnanti i ON l.id_insegnante = i.id
        WHERE l.tipo = 'collettiva' AND ${whereStato}
-         AND (l.anno_accademico IS NULL OR l.anno_accademico = $2)
+         AND l.anno_accademico IS NULL
        ORDER BY data DESC, ora_inizio DESC`,
-      [id, annoCorrente]
+      [id]
     );
     res.json(rows);
   } catch (err) {

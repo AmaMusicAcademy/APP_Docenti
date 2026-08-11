@@ -120,8 +120,8 @@ router.get('/lezioni', async (_req, res) => {
       LEFT JOIN insegnanti i ON l.id_insegnante = i.id
       LEFT JOIN allievi a ON l.id_allievo = a.id
       LEFT JOIN gruppi g ON g.id = l.gruppo_id
-      WHERE (l.anno_accademico IS NULL OR l.anno_accademico = $1)
-    `, [annoCorrente]);
+      WHERE l.anno_accademico IS NULL
+    `);
 
     const eventi = rows
       .filter((l) => l.data && l.ora_inizio && l.ora_fine)
