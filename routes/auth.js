@@ -37,6 +37,14 @@ router.post('/login', async (req, res) => {
       if (r2.rows.length) insegnanteId = r2.rows[0].id;
     }
 
+    // Blocca allievi disattivati (failsafe: l'account viene già eliminato a fine anno)
+    if (user.ruolo === 'allievo' && user.allievo_id) {
+      const ar = await pool.query('SELECT attivo FROM allievi WHERE id=$1', [user.allievo_id]);
+      if (ar.rows.length && ar.rows[0].attivo === false) {
+        return res.status(403).json({ message: 'Account sospeso. Contatta la segreteria per rinnovare l\'iscrizione.' });
+      }
+    }
+
     let allievoId = user.allievo_id || null;
 
     const token = jwt.sign(

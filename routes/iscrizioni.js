@@ -362,51 +362,84 @@ router.patch('/admin/iscrizioni/:id/accetta', authenticateToken, async (req, res
     if (!rows.length) return res.status(404).json({ error: 'Non trovata' });
     const isc = rows[0];
 
-    // ── Crea allievo + utente ──────────────────────────────────────────────
+    // ── Crea o riattiva allievo + utente ─────────────────────────────────
     let tempPassword = null;
     let allievoId = null;
+    let riattivato = false;
     try {
-      // INSERT con soli campi base (sempre presenti) — crea sempre un nuovo allievo
-      // (email/telefono condivisi sono ammessi, es. fratelli minorenni con contatti del genitore)
-      const { rows: ar } = await pool.query(
-        `INSERT INTO allievi (nome, cognome, email, telefono, strumento, data_nascita, note, data_iscrizione, quota_mensile)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,NOW(),$8) RETURNING id`,
-        [isc.nome, isc.cognome, isc.email, isc.telefono, isc.strumento, isc.data_nascita || null, isc.note,
-         calcolaQuotaMensile(isc.strumento)]
-      );
-      allievoId = ar[0].id;
+      // Cerca allievo esistente per codice fiscale (riiscrizione dopo chiusura anno)
+      const esistente = isc.codice_fiscale
+        ? await pool.query(`SELECT id FROM allievi WHERE codice_fiscale = $1 LIMIT 1`, [isc.codice_fiscale])
+        : { rows: [] };
 
-      // UPDATE con campi estesi
-      await pool.query(`
-        UPDATE allievi SET
-          codice_fiscale=$1, luogo_nascita=$2, indirizzo=$3, cap=$4, citta=$5, provincia=$6,
-          minore=$7,
-          genitore_nome=$8, genitore_cognome=$9, genitore_cf=$10,
-          genitore_data_nascita=$11, genitore_luogo_nascita=$12, genitore_indirizzo=$13,
-          genitore_telefono=$14, genitore_email=$15,
-          accettazione_reg=TRUE, data_accettazione_reg=NOW()
-        WHERE id=$16
-      `, [
-        isc.codice_fiscale, isc.luogo_nascita, isc.indirizzo, isc.cap, isc.citta, isc.provincia,
-        !!isc.minore,
-        isc.genitore_nome, isc.genitore_cognome, isc.genitore_cf,
-        isc.genitore_data_nascita || null, isc.genitore_luogo_nascita, isc.genitore_indirizzo,
-        isc.genitore_telefono, isc.genitore_email,
-        allievoId,
-      ]);
+      if (esistente.rows.length > 0) {
+        // Riattiva allievo esistente aggiornando i dati
+        allievoId = esistente.rows[0].id;
+        riattivato = true;
+        await pool.query(`
+          UPDATE allievi SET
+            nome=$1, cognome=$2, email=$3, telefono=$4, strumento=$5,
+            data_nascita=$6, note=$7, quota_mensile=$8,
+            luogo_nascita=$9, indirizzo=$10, cap=$11, citta=$12, provincia=$13,
+            minore=$14,
+            genitore_nome=$15, genitore_cognome=$16, genitore_cf=$17,
+            genitore_data_nascita=$18, genitore_luogo_nascita=$19, genitore_indirizzo=$20,
+            genitore_telefono=$21, genitore_email=$22,
+            attivo=TRUE, data_fine=NULL, data_iscrizione=NOW(),
+            accettazione_reg=TRUE, data_accettazione_reg=NOW()
+          WHERE id=$23
+        `, [
+          isc.nome, isc.cognome, isc.email, isc.telefono, isc.strumento,
+          isc.data_nascita || null, isc.note, calcolaQuotaMensile(isc.strumento),
+          isc.luogo_nascita, isc.indirizzo, isc.cap, isc.citta, isc.provincia,
+          !!isc.minore,
+          isc.genitore_nome, isc.genitore_cognome, isc.genitore_cf,
+          isc.genitore_data_nascita || null, isc.genitore_luogo_nascita, isc.genitore_indirizzo,
+          isc.genitore_telefono, isc.genitore_email,
+          allievoId,
+        ]);
+      } else {
+        // Nuovo allievo
+        const { rows: ar } = await pool.query(
+          `INSERT INTO allievi (nome, cognome, email, telefono, strumento, data_nascita, note, data_iscrizione, quota_mensile)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,NOW(),$8) RETURNING id`,
+          [isc.nome, isc.cognome, isc.email, isc.telefono, isc.strumento, isc.data_nascita || null, isc.note,
+           calcolaQuotaMensile(isc.strumento)]
+        );
+        allievoId = ar[0].id;
+        await pool.query(`
+          UPDATE allievi SET
+            codice_fiscale=$1, luogo_nascita=$2, indirizzo=$3, cap=$4, citta=$5, provincia=$6,
+            minore=$7,
+            genitore_nome=$8, genitore_cognome=$9, genitore_cf=$10,
+            genitore_data_nascita=$11, genitore_luogo_nascita=$12, genitore_indirizzo=$13,
+            genitore_telefono=$14, genitore_email=$15,
+            attivo=TRUE, accettazione_reg=TRUE, data_accettazione_reg=NOW()
+          WHERE id=$16
+        `, [
+          isc.codice_fiscale, isc.luogo_nascita, isc.indirizzo, isc.cap, isc.citta, isc.provincia,
+          !!isc.minore,
+          isc.genitore_nome, isc.genitore_cognome, isc.genitore_cf,
+          isc.genitore_data_nascita || null, isc.genitore_luogo_nascita, isc.genitore_indirizzo,
+          isc.genitore_telefono, isc.genitore_email,
+          allievoId,
+        ]);
+      }
 
-      // Crea credenziali: username = email se disponibile, altrimenti allievo_{id}
+      // Crea nuovo account (vecchio è stato eliminato alla chiusura anno)
       tempPassword = crypto.randomBytes(5).toString('hex');
       const hash = await bcrypt.hash(tempPassword, 10);
       const username = (isc.email || `allievo_${allievoId}`).toLowerCase().trim();
       await pool.query(
-        `INSERT INTO utenti (username, password, ruolo, allievo_id) VALUES ($1,$2,'allievo',$3) ON CONFLICT (username) DO UPDATE SET allievo_id=EXCLUDED.allievo_id`,
+        `INSERT INTO utenti (username, password, ruolo, allievo_id)
+         VALUES ($1,$2,'allievo',$3)
+         ON CONFLICT (username) DO UPDATE SET password=EXCLUDED.password, allievo_id=EXCLUDED.allievo_id`,
         [username, hash, allievoId]
       );
 
       await pool.query('UPDATE iscrizioni SET allievo_id=$1 WHERE id=$2', [allievoId, req.params.id]);
     } catch (e) {
-      console.error('Errore creazione allievo/utente:', e);
+      console.error('Errore creazione/riattivazione allievo:', e);
     }
 
     // Genera PDF con firma presidente e invia all'allievo

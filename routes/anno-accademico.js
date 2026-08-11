@@ -51,27 +51,26 @@ router.post('/admin/termina-anno-accademico', authenticateToken, requireAdmin, a
     await client.query('BEGIN');
 
     const [lezioni, pagamenti, quote, gruppiRes, iscrizioni] = await Promise.all([
-      client.query(
-        `UPDATE lezioni SET anno_accademico = $1 WHERE anno_accademico IS NULL`,
-        [anno]
-      ),
-      client.query(
-        `UPDATE pagamenti_mensili SET anno_accademico = $1 WHERE anno_accademico IS NULL`,
-        [anno]
-      ),
-      client.query(
-        `UPDATE quote_associative SET anno_accademico = $1 WHERE anno_accademico IS NULL`,
-        [anno]
-      ),
-      client.query(
-        `UPDATE gruppi SET anno_accademico = $1 WHERE anno_accademico IS NULL`,
-        [anno]
-      ),
-      client.query(
-        `UPDATE iscrizioni SET anno_accademico = $1 WHERE anno_accademico IS NULL`,
-        [anno]
-      ),
+      client.query(`UPDATE lezioni           SET anno_accademico = $1 WHERE anno_accademico IS NULL`, [anno]),
+      client.query(`UPDATE pagamenti_mensili SET anno_accademico = $1 WHERE anno_accademico IS NULL`, [anno]),
+      client.query(`UPDATE quote_associative SET anno_accademico = $1 WHERE anno_accademico IS NULL`, [anno]),
+      client.query(`UPDATE gruppi            SET anno_accademico = $1 WHERE anno_accademico IS NULL`, [anno]),
+      client.query(`UPDATE iscrizioni        SET anno_accademico = $1 WHERE anno_accademico IS NULL`, [anno]),
     ]);
+
+    // Disattiva tutti gli allievi ed elimina i loro account di accesso
+    const allievi = await client.query(
+      `UPDATE allievi SET attivo = FALSE, data_fine = NOW() WHERE attivo IS DISTINCT FROM FALSE RETURNING id`
+    );
+    const allievoIds = allievi.rows.map(r => r.id);
+    let utentiEliminati = 0;
+    if (allievoIds.length > 0) {
+      const del = await client.query(
+        `DELETE FROM utenti WHERE ruolo = 'allievo' AND allievo_id = ANY($1) RETURNING id`,
+        [allievoIds]
+      );
+      utentiEliminati = del.rowCount;
+    }
 
     await client.query('COMMIT');
 
@@ -84,6 +83,8 @@ router.post('/admin/termina-anno-accademico', authenticateToken, requireAdmin, a
         quote_associative: quote.rowCount,
         gruppi: gruppiRes.rowCount,
         iscrizioni: iscrizioni.rowCount,
+        allievi_disattivati: allievi.rowCount,
+        account_eliminati: utentiEliminati,
       },
     });
   } catch (err) {
