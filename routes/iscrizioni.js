@@ -1,11 +1,21 @@
 const express    = require('express');
 const PDFDocument = require('pdfkit');
+const { PDFDocument: PdfLib, rgb, StandardFonts } = require('pdf-lib');
 const nodemailer  = require('nodemailer');
 const crypto      = require('crypto');
 const bcrypt      = require('bcrypt');
+const fs         = require('fs');
+const path       = require('path');
 const { pool }    = require('../db');
 const { requireRole, authenticateToken } = require('../Middleware/auth');
 const { getAnnoAccademico } = require('../utils/annoAccademico');
+
+const TEMPLATE_DIR = path.join(__dirname, '../assets/templates');
+const NAVY  = rgb(0.118, 0.227, 0.373);
+const GRAY  = rgb(0.333, 0.333, 0.333);
+const LGRAY = rgb(0.753, 0.784, 0.847);
+const BLACK = rgb(0.067, 0.067, 0.067);
+const GREEN = rgb(0.0, 0.45, 0.1);
 
 const router = express.Router();
 
@@ -101,7 +111,7 @@ function createTransport() {
   });
 }
 
-// ── Generatore PDF ─────────────────────────────────────────────────────────
+// ── Helpers PDF ────────────────────────────────────────────────────────────
 function fmtData(d) {
   if (!d) return '—';
   const dt = new Date(d);
@@ -110,301 +120,275 @@ function fmtData(d) {
   return `${dt.getDate()} ${mesi[dt.getMonth()+1]} ${dt.getFullYear()}`;
 }
 
-function generatePDF(isc, { withPresidente = false } = {}) {
+// Genera le pagine del Regolamento con PDFKit (stile identico ai template AMA)
+function generaRegolamentoPDFKit(isc) {
   return new Promise((resolve, reject) => {
-    const doc = new PDFDocument({ size: 'A4', margin: 50, autoFirstPage: false });
+    const doc = new PDFDocument({ size: 'A4', margin: 0, autoFirstPage: false });
     const chunks = [];
     doc.on('data', c => chunks.push(c));
     doc.on('end', () => resolve(Buffer.concat(chunks)));
     doc.on('error', reject);
 
-    const M = 50;           // margine laterale
-    const W = 595 - M * 2; // larghezza utile
-    const NAVY  = '#1e3a5f';
-    const GRAY  = '#555555';
-    const LGRAY = '#c0c8d8';
-    const BLACK = '#111111';
-    const anno  = getAnnoAccademico().replace('-', '/');
+    const anno = getAnnoAccademico().replace('-', '/');
+    const M = 30.5; const W = 534;
 
-    // ── Helper: intestazione AMA ──────────────────────────────────────────
-    function intestazione(titoloDoc, sottotitolo = '') {
-      doc.addPage();
-      doc.fontSize(7).font('Helvetica').fillColor(GRAY)
-        .text('Viale Felissent, 14 — Treviso (TV)   |   amamusicacademy.it · WhatsApp 375 668 8094', M, 40, { align: 'center', width: W });
-      doc.moveDown(0.3);
-      doc.fontSize(7).font('Helvetica-Bold').fillColor(NAVY)
-        .text('MODULO UFFICIALE · AMA ACADEMY OF MUSICAL ARTS', { align: 'center', width: W });
-      doc.moveDown(0.5);
-      doc.moveTo(M, doc.y).lineTo(M + W, doc.y).strokeColor(NAVY).lineWidth(1.5).stroke();
-      doc.moveDown(0.8);
-      doc.fontSize(15).font('Helvetica-Bold').fillColor(NAVY).text(titoloDoc, { align: 'center', width: W });
+    function nuovaPagina(titolo, sottotitolo) {
+      doc.addPage({ size: 'A4', margin: 0 });
+      // Banda superiore grigia (come nei template)
+      doc.rect(0, 0, 595, 60.5).fill('#f0f0f0');
+      // Testo indirizzo in alto a destra
+      doc.fontSize(6).font('Helvetica').fillColor('#555')
+        .text('Viale Felissent, 14 — Treviso (TV)', 0, 25, { align: 'right', width: 565 });
+      doc.fontSize(6).fillColor('#555')
+        .text('amamusicacademy.it · WhatsApp 375 668 8094', 0, 35, { align: 'right', width: 565 });
+      // "MODULO UFFICIALE..."
+      doc.fontSize(6).font('Helvetica-Bold').fillColor('#1e3a5f')
+        .text('MODULO UFFICIALE · AMA ACADEMY OF MUSICAL ARTS', M, 74, { width: W });
+      // Titolo documento
+      doc.fontSize(16).font('Helvetica-Bold').fillColor('#1e3a5f')
+        .text(titolo, M, 90, { width: W });
       if (sottotitolo) {
-        doc.moveDown(0.2);
-        doc.fontSize(8.5).font('Helvetica').fillColor(GRAY).text(sottotitolo, { align: 'center', width: W });
+        doc.fontSize(7).font('Helvetica').fillColor('#555')
+          .text(sottotitolo, M, 112, { width: W });
       }
-      doc.moveDown(0.9);
+      // Linea separatrice
+      doc.moveTo(M, 125).lineTo(M + W, 125).strokeColor('#1e3a5f').lineWidth(0.6).stroke();
+      // Footer
+      doc.rect(0, 681, 595, 30).fill('#f0f0f0');
+      doc.fontSize(6).font('Helvetica').fillColor('#555')
+        .text('AMA · Academy of Musical Arts   Viale Felissent, 14 – Treviso   amamusicacademy.it   @ama_academy_of_musical_arts',
+          0, 694, { align: 'center', width: 595 });
+      doc.y = 138;
     }
 
-    // ── Helper: footer AMA ────────────────────────────────────────────────
-    function footer() {
-      const y = 820;
-      doc.moveTo(M, y).lineTo(M + W, y).strokeColor(LGRAY).lineWidth(0.5).stroke();
-      doc.fontSize(7).font('Helvetica').fillColor(GRAY)
-        .text('AMA · Academy of Musical Arts   Viale Felissent, 14 – Treviso   amamusicacademy.it   @ama_academy_of_musical_arts', M, y + 4, { align: 'center', width: W });
-    }
-
-    // ── Helper: sezione ───────────────────────────────────────────────────
     function sezione(titolo) {
-      if (doc.y > 730) { footer(); intestazione('(continua)'); }
-      doc.moveDown(0.5);
-      doc.fontSize(9).font('Helvetica-Bold').fillColor(NAVY).text(titolo.toUpperCase(), M, doc.y, { width: W });
-      doc.moveTo(M, doc.y).lineTo(M + W, doc.y).strokeColor(LGRAY).lineWidth(0.5).stroke();
-      doc.moveDown(0.35);
-    }
-
-    // ── Helper: riga label/valore ─────────────────────────────────────────
-    function riga(label, val) {
-      if (doc.y > 750) { footer(); intestazione('(continua)'); }
-      doc.fontSize(8.5).font('Helvetica-Bold').fillColor('#333').text(label + '  ', M, doc.y, { continued: true, width: W });
-      doc.font('Helvetica').fillColor(BLACK).text(val || '—');
-    }
-
-    // ── Helper: paragrafo testo ───────────────────────────────────────────
-    function paragrafo(testo, opts = {}) {
-      if (doc.y > 750) { footer(); intestazione('(continua)'); }
-      doc.fontSize(8.5).font('Helvetica').fillColor(BLACK)
-        .text(testo, M, doc.y, { width: W, align: 'justify', lineGap: 2, ...opts });
+      if (doc.y > 640) nuovaPagina('Regolamento Interno (continua)', `Anno accademico ${anno}`);
       doc.moveDown(0.4);
+      doc.fontSize(8).font('Helvetica-Bold').fillColor('#1e3a5f')
+        .text(titolo.toUpperCase(), M, doc.y, { width: W });
+      doc.moveTo(M, doc.y).lineTo(M + W, doc.y).strokeColor('#c0c8d8').lineWidth(0.4).stroke();
+      doc.moveDown(0.3);
     }
 
-    // ── Helper: immagine base64 ───────────────────────────────────────────
-    function imgBase64(b64, maxW = 220, maxH = 80) {
-      if (!b64) return false;
-      try {
-        const data = b64.replace(/^data:image\/\w+;base64,/, '');
-        doc.image(Buffer.from(data, 'base64'), { width: maxW, height: maxH, fit: [maxW, maxH] });
-        return true;
-      } catch { return false; }
+    function paragrafo(testo) {
+      const linee = testo.split('\n');
+      for (const linea of linee) {
+        if (doc.y > 650) nuovaPagina('Regolamento Interno (continua)', `Anno accademico ${anno}`);
+        doc.fontSize(8).font('Helvetica').fillColor('#111')
+          .text(linea.trim() || ' ', M, doc.y, { width: W, align: 'justify', lineGap: 1.5 });
+        if (linea.trim() === '') doc.moveDown(0.2);
+      }
+      doc.moveDown(0.3);
     }
 
-    // ══════════════════════════════════════════════════════════════════════
-    // PAGINA 1 — DOMANDA DI ISCRIZIONE
-    // ══════════════════════════════════════════════════════════════════════
-    intestazione(
-      'Domanda di Iscrizione',
-      `Anno accademico ${anno} — Presentata il ${fmtData(isc.created_at)}`
-    );
+    nuovaPagina('Regolamento Interno', `Anno accademico ${anno}`);
 
-    sezione('Dati personali allievo/a');
-    riga('Nome e Cognome:', `${isc.nome} ${isc.cognome}`);
-    riga('Codice Fiscale:', isc.codice_fiscale);
-    riga('Data di nascita:', fmtData(isc.data_nascita));
-    riga('Luogo di nascita:', isc.luogo_nascita);
-    const indAllievo = [isc.indirizzo, isc.cap, isc.citta, isc.provincia ? `(${isc.provincia})` : ''].filter(Boolean).join(' ');
-    riga('Indirizzo:', indAllievo || '—');
-    riga('Telefono:', isc.telefono);
-    riga('Email:', isc.email);
+    sezione('Iscrizione e tesseramento');
+    paragrafo('L\'iscrizione al corso prescelto deve essere effettuata a seguito del tesseramento all\'associazione stessa, tramite versamento della quota associativa di 50 euro.');
 
-    if (isc.minore) {
-      sezione('Dati genitore / tutore (allievo/a minorenne)');
-      riga('Nome e Cognome:', `${isc.genitore_nome || ''} ${isc.genitore_cognome || ''}`.trim());
-      riga('Codice Fiscale:', isc.genitore_cf);
-      riga('Data di nascita:', fmtData(isc.genitore_data_nascita));
-      riga('Luogo di nascita:', isc.genitore_luogo_nascita);
-      riga('Indirizzo:', isc.genitore_indirizzo);
-      riga('Telefono:', isc.genitore_telefono);
-      riga('Email:', isc.genitore_email);
-    }
+    sezione('Corsi ordinari');
+    paragrafo('Il percorso di studi si articola in 36 (trentasei) lezioni da settembre a maggio, secondo il calendario corsi annuale. Non rientrano nel percorso di studi eventuali masterclass o corsi extra organizzati dall\'associazione.\n\nLa durata delle lezioni è così articolata:\n— 45 o 60 minuti per i corsi individuali, in base alla tipologia di percorso scelto (€ 80 o € 100 mensili);\n— 60 minuti per i corsi di gruppo (€ 30 mensili).\n\nLe prove, i saggi, i concerti e gli eventi organizzati dall\'Accademia ai quali l\'allievo è convocato sono considerati attività didattiche a tutti gli effetti e vengono conteggiati tra le 36 lezioni previste. Gli allievi non coinvolti nello spettacolo finale potranno partecipare a concerti nella sala interna dell\'Accademia senza costo aggiuntivo. La partecipazione non dà diritto a lezioni aggiuntive, recuperi, riduzioni o rimborsi.');
 
-    sezione('Corso richiesto');
-    riga('Materia / Corso:', isc.strumento);
-    if (isc.note) riga('Note:', isc.note);
+    sezione('Modalità di pagamento');
+    paragrafo('Il costo del percorso formativo è determinato su base annuale e comprende complessivamente 36 lezioni, distribuite nei 9 mesi dell\'anno accademico (settembre–maggio). L\'importo viene suddiviso in 9 quote mensili di pari importo, da versare entro la prima lezione di ciascun mese.\n\nLa quota mensile non corrisponde al numero effettivo di lezioni del singolo mese, ma rappresenta una rata del costo annuale complessivo. La programmazione prevede una media di 4 lezioni al mese: alcuni mesi potranno averne 3, altri 4 o 5, senza variazioni dell\'importo mensile.\n\nLa quota deve essere corrisposta integralmente, indipendentemente dalla presenza dell\'allievo. Non sono consentite riduzioni, compensazioni o ricalcoli. In caso di mancato pagamento nei termini, il tesseramento decade e le lezioni vengono sospese, senza diritto a rimborso.');
 
-    sezione('Dichiarazioni e consensi');
-    const chk = (v) => v ? '[X]' : '[ ]';
-    doc.fontSize(8.5).font('Helvetica').fillColor(BLACK);
-    doc.text(`${chk(isc.acc_tesseramento)}  Sottoscrizione domanda di tesseramento                               obbligatorio`, M, doc.y, { width: W });
-    doc.moveDown(0.25);
-    doc.text(`${chk(isc.acc_regolamento)}  Accettazione del regolamento interno                                  obbligatorio`, M, doc.y, { width: W });
-    doc.moveDown(0.25);
-    doc.text(`${chk(isc.acc_privacy)}  Consenso al trattamento dei dati personali (Informativa Privacy allegata)  obbligatorio`, M, doc.y, { width: W });
-    doc.moveDown(0.25);
-    doc.text(`${chk(isc.acc_immagini)}  Consenso all'uso delle immagini per canali social e promozionali AMA       facoltativo`, M, doc.y, { width: W });
+    sezione('Orari di frequenza');
+    paragrafo('Gli orari delle lezioni vengono concordati tra alunno ed insegnante, secondo le disponibilità dell\'insegnante e dell\'Accademia. Nel rispetto di tutti gli studenti e degli insegnanti si chiede la massima puntualità.');
+
+    sezione('Spettacolo finale di giugno (Loggia dei Cavalieri)');
+    paragrafo('La partecipazione allo spettacolo finale è riservata agli allievi che abbiano frequentato con assiduità e siano ritenuti pronti dal proprio docente, in accordo con la Direttrice artistica.\n\nPer ciascun allievo coinvolto è prevista:\n— quota di partecipazione di € 50,00 (comprensiva di prova generale e spettacolo);\n— quota aggiuntiva di € 10,00 per la maglietta ufficiale dell\'Accademia.\n\nImporto complessivo: € 60,00, da versare entro il 15 maggio. Le quote versate non sono rimborsabili in caso di rinuncia, salvo annullamento dello spettacolo da parte dell\'Accademia.');
+
+    sezione('Assenze e recupero delle lezioni');
+    paragrafo('In caso di impossibilità a partecipare, l\'allievo deve informare tempestivamente il proprio docente. Per le lezioni individuali sono previsti massimo 3 (tre) recuperi per anno accademico, riconosciuti solo se l\'assenza è comunicata con almeno 24 ore di preavviso.\n\nAssenze comunicate con meno di 24 ore di preavviso, o in caso di assenza senza avviso, la lezione è considerata svolta e persa senza possibilità di recupero o rimborso.\n\nLe lezioni di recupero devono essere effettuate entro il 31 maggio, in data e orario stabiliti dal docente. Qualora l\'allievo non accetti la proposta, il recupero è definitivamente perso. In caso di mancata presentazione a un recupero concordato, la lezione è persa e non riprogrammabile.\n\nIn caso di ritiro anticipato, i recuperi devono essere effettuati entro l\'ultimo mese regolarmente pagato.\n\nLe lezioni di gruppo non sono recuperabili. In caso di assenza del docente, l\'Accademia garantirà una sostituzione o il recupero in data successiva, non conteggiato tra i 3 recuperi annuali.');
+
+    sezione('Ritiro dalle lezioni');
+    paragrafo('L\'iscrizione è riferita all\'intero percorso annuale. Le comunicazioni di ritiro devono pervenire entro 30 giorni: nel rispetto di tale termine le quote successive ai 30 giorni non saranno dovute. Con il ritiro decade anche il tesseramento annuale, senza possibilità di rimborso della quota di iscrizione.');
+
+    sezione('Percorso di preparazione agli esami Trinity');
+    paragrafo('Gli allievi interessati al percorso Trinity devono comunicarlo alla Segreteria all\'inizio dell\'anno accademico. Il percorso comprende: la consueta lezione individuale; un incontro mensile di solfeggio di gruppo (€ 10,00 ciascuno); l\'acquisto del materiale didattico Trinity.\n\nIl docente individuerà il grado più adeguato. L\'iscrizione all\'esame è subordinata alla valutazione del docente. Gli esami si svolgono in aprile, maggio o giugno. Al costo d\'esame si aggiunge un contributo di € 20,00 per spese di Segreteria. Trinity rilascerà la certificazione ufficiale con votazione e pergamena.');
+
+    sezione('Crediti formativi');
+    paragrafo('L\'Accademia rilascia idonea documentazione relativa ai crediti scolastici agli allievi che ne presentano specifica richiesta.');
+
+    // Firma per presa visione
     doc.moveDown(0.8);
-
-    // Firme affiancate
-    const firmaY = doc.y;
-    doc.fontSize(8).font('Helvetica-Bold').fillColor(NAVY)
-      .text('FIRMA ALLIEVO / GENITORE', M, firmaY, { width: 230 });
-    doc.fontSize(8).font('Helvetica-Bold').fillColor(NAVY)
-      .text('FIRMA DEL PRESIDENTE', M + 280, firmaY, { width: 230 });
+    if (doc.y > 600) nuovaPagina('Regolamento Interno (continua)', `Anno accademico ${anno}`);
+    doc.moveTo(M, doc.y).lineTo(M + W, doc.y).strokeColor('#c0c8d8').lineWidth(0.4).stroke();
+    doc.moveDown(0.4);
+    doc.fontSize(8).font('Helvetica-Bold').fillColor('#1e3a5f')
+      .text('PER PRESA VISIONE — ALLIEVO / GENITORE', M, doc.y, { width: 260, continued: false });
+    doc.fontSize(8).font('Helvetica-Bold').fillColor('#1e3a5f')
+      .text('FIRMA DEL PRESIDENTE', M + 280, doc.y - 9.5, { width: 260 });
     doc.moveDown(0.3);
-    if (isc.firma_allievo) {
-      imgBase64(isc.firma_allievo, 200, 60);
-    } else {
-      doc.moveTo(M, doc.y + 40).lineTo(M + 200, doc.y + 40).strokeColor(LGRAY).lineWidth(0.5).stroke();
-    }
-    if (withPresidente && isc.firma_presidente) {
-      const yFirma = firmaY + 14;
-      try {
-        const data = isc.firma_presidente.replace(/^data:image\/\w+;base64,/, '');
-        doc.image(Buffer.from(data, 'base64'), M + 280, yFirma, { width: 200, height: 60, fit: [200, 60] });
-      } catch {}
-    }
-    if (withPresidente && isc.accettata_il) {
-      doc.moveDown(0.4);
-      doc.fontSize(8).font('Helvetica').fillColor(GRAY)
-        .text(`Accettata il: ${fmtData(isc.accettata_il)}`, { align: 'right', width: W });
-    }
-
-    footer();
-
-    // ══════════════════════════════════════════════════════════════════════
-    // PAGINA 2 — INFORMATIVA PRIVACY
-    // ══════════════════════════════════════════════════════════════════════
-    intestazione(
-      'Informativa sul Trattamento dei Dati Personali',
-      'Ai sensi degli artt. 13-14 del Regolamento (UE) 2016/679 (GDPR)'
-    );
-
-    function articolo(num, titolo, testo) {
-      sezione(`${num}. ${titolo}`);
-      paragrafo(testo);
-    }
-
-    articolo('1', 'Titolare del trattamento',
-      'Titolare del trattamento dei dati è AMA – Academy of Musical Arts, con sede in Viale Felissent 14, 31100 Treviso (TV), contattabile all\'indirizzo email indicato sul sito amamusicacademy.it.');
-
-    articolo('2', 'Finalità del trattamento',
-      'I dati personali forniti in sede di iscrizione sono trattati per: gestione amministrativa dell\'iscrizione e della frequenza ai corsi; organizzazione delle attività didattiche, sessioni d\'esame e saggi; comunicazioni relative ai servizi dell\'accademia; adempimenti contabili e fiscali previsti dalla legge.');
-
-    articolo('3', 'Base giuridica',
-      'Il trattamento si basa sull\'esecuzione del contratto di iscrizione ai corsi e sull\'adempimento di obblighi di legge. Il trattamento delle immagini per finalità promozionali si basa sul consenso specifico, facoltativo e revocabile in ogni momento.');
-
-    articolo('4', 'Modalità e conservazione',
-      'I dati sono trattati con strumenti cartacei e informatici, con misure di sicurezza adeguate a prevenirne la perdita, l\'uso illecito o l\'accesso non autorizzato, e sono conservati per il tempo necessario alle finalità indicate e nel rispetto dei termini di legge.');
-
-    articolo('5', 'Comunicazione a terzi',
-      'I dati non sono diffusi. Possono essere comunicati a soggetti terzi solo per adempimenti amministrativi, contabili o assicurativi strettamente connessi all\'attività didattica (es. Trinity College London per le certificazioni d\'esame).');
-
-    articolo('6', 'Diritti dell\'interessato',
-      'L\'interessato può in qualsiasi momento esercitare i diritti di accesso, rettifica, cancellazione, limitazione, portabilità e opposizione al trattamento, oltre al diritto di revocare il consenso prestato, scrivendo al Titolare ai recapiti indicati in intestazione.');
-
-    sezione('Consenso');
-    doc.fontSize(8.5).font('Helvetica').fillColor(BLACK);
-    doc.text(`${chk(isc.acc_privacy)}  Dichiaro di aver letto l'informativa e presto il consenso al trattamento dei dati personali per le finalità di cui ai punti 2 e 3          obbligatorio`, M, doc.y, { width: W });
-    doc.moveDown(0.3);
-    doc.text(`${chk(isc.acc_immagini)}  Presto il consenso all'uso della mia immagine (o di quella del minore rappresentato) su canali social e materiali promozionali AMA      facoltativo`, M, doc.y, { width: W });
-    doc.moveDown(0.8);
-
-    const privacyFirmaY = doc.y;
-    doc.fontSize(8).font('Helvetica-Bold').fillColor(NAVY)
-      .text('LUOGO E DATA', M, privacyFirmaY, { width: 230 });
-    doc.fontSize(8).font('Helvetica-Bold').fillColor(NAVY)
-      .text('FIRMA ALLIEVO / GENITORE', M + 280, privacyFirmaY, { width: 230 });
-    doc.moveDown(0.3);
-    doc.fontSize(8.5).font('Helvetica').fillColor(BLACK)
-      .text(`Treviso, ${fmtData(isc.created_at)}`, M, doc.y, { width: 230 });
-    if (isc.firma_allievo) {
-      try {
-        const data = isc.firma_allievo.replace(/^data:image\/\w+;base64,/, '');
-        doc.image(Buffer.from(data, 'base64'), M + 280, privacyFirmaY + 10, { width: 200, height: 55, fit: [200, 55] });
-      } catch {}
-    }
-
-    footer();
-
-    // ══════════════════════════════════════════════════════════════════════
-    // PAGINA 3+ — REGOLAMENTO INTERNO
-    // ══════════════════════════════════════════════════════════════════════
-    intestazione('Regolamento Interno', `Anno accademico ${anno}`);
-
-    function regArticolo(titolo, testo) {
-      sezione(titolo);
-      paragrafo(testo);
-    }
-
-    regArticolo('Iscrizione e tesseramento',
-      'L\'iscrizione al corso prescelto deve essere effettuata a seguito del tesseramento all\'associazione stessa, tramite versamento della quota associativa di 50 euro.');
-
-    regArticolo('Corsi ordinari',
-      'Il percorso di studi si articola in 36 (trentasei) lezioni da settembre a maggio, secondo il calendario corsi annuale. Non rientrano nel percorso di studi eventuali masterclass o corsi extra organizzati dall\'associazione.\n\nLa durata delle lezioni è così articolata:\n— 45 o 60 minuti per i corsi individuali, in base alla tipologia di percorso scelto (€ 80 o € 100 mensili);\n— 60 minuti per i corsi di gruppo (€ 30 mensili).\n\nLe prove, i saggi, i concerti e gli eventi organizzati dall\'Accademia ai quali l\'allievo è convocato sono considerati attività didattiche a tutti gli effetti e vengono conteggiati tra le 36 lezioni previste dal percorso annuale, in sostituzione della normale lezione individuale o di gruppo.\n\nGli allievi non coinvolti nello spettacolo finale potranno partecipare a concerti o esibizioni organizzati nella sala concerti interna dell\'Accademia, senza alcun costo aggiuntivo. La partecipazione a tali attività non dà diritto a lezioni aggiuntive, recuperi, riduzioni o rimborsi delle quote versate.');
-
-    regArticolo('Modalità di pagamento',
-      'Il costo del percorso formativo è determinato su base annuale e comprende complessivamente 36 lezioni, distribuite nei 9 mesi dell\'anno accademico, da settembre a maggio.\n\nL\'importo annuale viene suddiviso in 9 quote mensili di pari importo, da versare entro la prima lezione di ciascun mese. La quota mensile non corrisponde al numero effettivo di lezioni svolte nel singolo mese, ma rappresenta una rata del costo complessivo dell\'intero percorso annuale.\n\nLa programmazione prevede una media di 4 lezioni al mese calcolata sull\'intero anno accademico. Di conseguenza, alcuni mesi potranno prevedere 3 lezioni, altri 4 oppure 5, in relazione al calendario, alle festività e alla distribuzione delle settimane, senza che ciò comporti variazioni dell\'importo mensile dovuto.\n\nLa quota deve essere corrisposta integralmente, indipendentemente dalla presenza o dall\'assenza dell\'allievo e dal numero di lezioni previste nel singolo mese. Non sono pertanto consentite riduzioni, compensazioni o ricalcoli della quota mensile.\n\nIn caso di mancato pagamento entro i termini stabiliti, il tesseramento annuale all\'Associazione decade e le lezioni vengono sospese, senza diritto al rimborso delle somme già versate.');
-
-    regArticolo('Orari di frequenza',
-      'Gli orari delle lezioni vengono concordati tra alunno ed insegnante, secondo le disponibilità dell\'insegnante e dell\'Accademia. Nel rispetto di tutti gli studenti ed insegnanti si chiede la massima puntualità.');
-
-    regArticolo('Spettacolo finale di giugno (Loggia dei Cavalieri)',
-      'La partecipazione allo spettacolo finale è riservata agli allievi che abbiano frequentato con assiduità le lezioni durante l\'intero anno accademico e che siano ritenuti pronti all\'esibizione dal proprio docente, in accordo con la Direttrice artistica.\n\nPer ciascun allievo coinvolto è prevista:\n— una quota di partecipazione di € 50,00, comprensiva della prova generale e della partecipazione allo spettacolo;\n— una quota aggiuntiva di € 10,00 per l\'acquisto della maglietta ufficiale dell\'Accademia.\n\nL\'importo complessivo è pertanto pari a € 60,00, da versare presso la Segreteria entro e non oltre il 15 maggio. Le quote versate non saranno rimborsabili in caso di rinuncia o mancata partecipazione dell\'allievo, salvo annullamento dello spettacolo disposto dall\'Accademia.');
-
-    regArticolo('Assenze e recupero delle lezioni',
-      'In caso di impossibilità a partecipare a una lezione individuale o di gruppo, l\'allievo è tenuto a informare tempestivamente il proprio docente.\n\nPer le lezioni individuali sono previsti un massimo di 3 (tre) recuperi complessivi per ciascun anno accademico. Il recupero è riconosciuto esclusivamente quando l\'assenza viene comunicata con almeno 24 ore di preavviso rispetto all\'orario previsto per la lezione.\n\nQualora l\'assenza venga comunicata con un preavviso inferiore alle 24 ore, a ridosso della lezione, oppure l\'allievo non si presenti senza avvisare, la lezione sarà considerata svolta e definitivamente persa, senza possibilità di recupero, rimborso, riduzione o eccezione.\n\nLe lezioni di recupero dovranno essere effettuate entro la conclusione dell\'anno accademico, fissata al 31 maggio. La data e l\'orario del recupero saranno stabiliti dal docente in base alla propria disponibilità e a quella degli spazi dell\'Accademia.\n\nIl docente potrà formulare una proposta di data e orario per ciascuna lezione da recuperare. Qualora l\'allievo non accetti, la lezione di recupero sarà considerata definitivamente persa. In caso di mancata presentazione a un recupero già concordato, la lezione sarà ugualmente considerata persa e non potrà essere riprogrammata.\n\nIn caso di ritiro anticipato dai corsi, gli eventuali recuperi maturati dovranno essere effettuati entro l\'ultimo mese regolarmente pagato.\n\nLe lezioni di gruppo non sono recuperabili in caso di assenza dell\'allievo e non danno diritto a rimborsi, riduzioni o compensazioni sulle quote versate.\n\nIn caso di assenza del docente, l\'Accademia potrà affidare la lezione a un insegnante sostituto. Qualora non fosse possibile garantire la sostituzione, la lezione non svolta sarà recuperata in una data successiva e non sarà conteggiata tra i tre recuperi annuali riconosciuti all\'allievo.');
-
-    regArticolo('Ritiro dalle lezioni',
-      'L\'iscrizione effettuata all\'inizio dell\'anno accademico è riferita all\'intero percorso di studi. Eventuali comunicazioni di ritiro dal percorso intrapreso dovranno pervenire entro 30 giorni. Nel rispetto di tale termine le quote da versare oltre i 30 giorni non saranno dovute.\n\nCon la comunicazione di ritiro dal percorso decade anche il tesseramento annuale all\'associazione, senza la possibilità di rimborso dell\'iscrizione.');
-
-    regArticolo('Percorso di preparazione agli esami Trinity',
-      'All\'inizio dell\'anno accademico, gli allievi interessati al percorso Trinity dovranno comunicarlo alla Segreteria, così da consentire l\'organizzazione e l\'avvio della preparazione specifica prevista dal programma d\'esame.\n\nIl percorso Trinity comprende: la consueta lezione individuale; un incontro mensile di solfeggio di gruppo, finalizzato alla preparazione teorico-musicale richiesta dal programma d\'esame, al costo aggiuntivo di € 10,00 per ciascun incontro; l\'acquisto del libro e dell\'eventuale materiale didattico Trinity.\n\nIl docente individuerà il grado Trinity più adeguato e definirà il programma di studio. L\'iscrizione all\'esame sarà subordinata alla valutazione del docente circa l\'effettivo raggiungimento del livello di preparazione richiesto.\n\nGli esami potranno svolgersi nei mesi di aprile, maggio o giugno, di fronte a una commissione composta da docenti presso la nostra accademia. Il costo dell\'esame varia in base al grado prescelto e sarà comunicato dalla Segreteria prima dell\'iscrizione. Alla quota d\'esame dovrà essere aggiunto un contributo di € 20,00 per le spese di Segreteria.\n\nAl termine della procedura, Trinity rilascerà la certificazione ufficiale con la votazione conseguita e la relativa pergamena.');
-
-    regArticolo('Crediti formativi',
-      'L\'Accademia rilascia idonea documentazione relativa ai crediti scolastici agli allievi che ne presentano specifica richiesta.');
-
-    // Firma presa visione
-    doc.moveDown(0.8);
-    sezione('Per presa visione');
-    const regFirmaY = doc.y;
-    doc.fontSize(8).font('Helvetica-Bold').fillColor(NAVY)
-      .text('ALLIEVO / GENITORE', M, regFirmaY, { width: 230 });
-    doc.fontSize(8).font('Helvetica-Bold').fillColor(NAVY)
-      .text('FIRMA DEL PRESIDENTE', M + 280, regFirmaY, { width: 230 });
-    doc.moveDown(0.3);
-    doc.fontSize(8.5).font('Helvetica').fillColor(BLACK)
-      .text(`Treviso, ${fmtData(isc.created_at)}`, M, doc.y, { width: 230 });
-    if (isc.firma_allievo) {
-      try {
-        const data = isc.firma_allievo.replace(/^data:image\/\w+;base64,/, '');
-        doc.image(Buffer.from(data, 'base64'), M + 280, regFirmaY + 10, { width: 200, height: 55, fit: [200, 55] });
-      } catch {}
-    }
-
-    footer();
-
-    // ══════════════════════════════════════════════════════════════════════
-    // PAGINE DOCUMENTI ALLEGATI
-    // ══════════════════════════════════════════════════════════════════════
-    const allegati = [
-      { label: 'Documento d\'identità allievo/a — fronte', b64: isc.doc_allievo_fronte },
-      { label: 'Documento d\'identità allievo/a — retro',  b64: isc.doc_allievo_retro },
-      { label: 'Documento d\'identità genitore — fronte',  b64: isc.doc_genitore_fronte },
-      { label: 'Documento d\'identità genitore — retro',   b64: isc.doc_genitore_retro },
-    ];
-
-    for (const all of allegati) {
-      if (!all.b64) continue;
-      doc.addPage();
-      doc.fontSize(7).font('Helvetica-Bold').fillColor(NAVY)
-        .text('MODULO UFFICIALE · AMA ACADEMY OF MUSICAL ARTS', M, 40, { align: 'center', width: W });
-      doc.moveDown(0.5);
-      doc.moveTo(M, doc.y).lineTo(M + W, doc.y).strokeColor(NAVY).lineWidth(1.5).stroke();
-      doc.moveDown(1);
-      doc.fontSize(10).font('Helvetica-Bold').fillColor(NAVY)
-        .text('Allegati — Copie Documenti Identità', { align: 'center', width: W });
-      doc.moveDown(0.5);
-      doc.fontSize(9).font('Helvetica').fillColor(GRAY)
-        .text(all.label, { align: 'center', width: W });
-      doc.moveDown(0.8);
-      try {
-        const data = all.b64.replace(/^data:image\/\w+;base64,/, '');
-        const maxW = W, maxH = 550;
-        doc.image(Buffer.from(data, 'base64'), M, doc.y, { fit: [maxW, maxH], align: 'center' });
-      } catch {}
-      footer();
-    }
+    doc.fontSize(8).font('Helvetica').fillColor('#555')
+      .text(`Treviso, ${fmtData(isc.created_at)}`, M, doc.y, { width: 260 });
+    doc.moveTo(M, doc.y + 40).lineTo(M + 240, doc.y + 40).strokeColor('#c0c8d8').lineWidth(0.4).stroke();
+    doc.moveTo(M + 280, doc.y).lineTo(M + 280 + 240, doc.y).strokeColor('#c0c8d8').lineWidth(0.4).stroke();
 
     doc.end();
   });
+}
+
+async function generatePDF(isc, { withPresidente = false } = {}) {
+  const H = 842; // altezza A4 in pt (pdf-lib usa y dal basso)
+
+  // Converte coordinata y pdfplumber (origine in alto) → pdf-lib (origine in basso)
+  const py = (ppy, fontSize = 10) => H - ppy - fontSize;
+
+  // Helper embed firma base64
+  async function embedFirma(pdfDoc, b64str) {
+    if (!b64str) return null;
+    try {
+      const data = b64str.replace(/^data:image\/\w+;base64,/, '');
+      const buf = Buffer.from(data, 'base64');
+      return b64str.includes('image/png')
+        ? await pdfDoc.embedPng(buf)
+        : await pdfDoc.embedJpg(buf);
+    } catch { return null; }
+  }
+
+  // ── 1. Modulo Iscrizione — overlay su template ──────────────────────────
+  const modIscBytes = fs.readFileSync(path.join(TEMPLATE_DIR, 'AMA_Modulo_Iscrizione.pdf'));
+  const modIscDoc = await PdfLib.load(modIscBytes);
+  const [pageModulo] = modIscDoc.getPages();
+  const fontM  = await modIscDoc.embedFont(StandardFonts.Helvetica);
+  const fontMB = await modIscDoc.embedFont(StandardFonts.HelveticaBold);
+
+  const drawM = (text, x, ppy, opts = {}) => {
+    const size = opts.size || 9.5;
+    pageModulo.drawText(String(text || ''), {
+      x, y: py(ppy, size), size,
+      font: opts.bold ? fontMB : fontM,
+      color: opts.color || BLACK,
+    });
+  };
+  const checkM = (val, x, ppy) => {
+    if (!val) return;
+    pageModulo.drawText('X', { x: x + 1, y: py(ppy, 9), size: 9, font: fontMB, color: NAVY });
+  };
+
+  // Allievo
+  drawM(`${isc.nome} ${isc.cognome}`, 46, 190);
+  drawM(isc.codice_fiscale, 347, 190);
+  drawM(fmtData(isc.data_nascita), 46, 222);
+  drawM(isc.luogo_nascita, 347, 222);
+  const indAllievo = [isc.indirizzo, isc.cap, isc.citta, isc.provincia ? `(${isc.provincia})` : ''].filter(Boolean).join(' ');
+  drawM(indAllievo, 46, 254);
+  drawM(isc.telefono, 46, 286);
+  drawM(isc.email, 347, 286);
+
+  // Genitore
+  if (isc.minore) {
+    drawM(`${isc.genitore_nome || ''} ${isc.genitore_cognome || ''}`.trim(), 46, 366);
+    drawM(isc.genitore_cf, 347, 366);
+    drawM(isc.genitore_telefono, 46, 398);
+    drawM(isc.genitore_email, 347, 398);
+  }
+
+  // Corso
+  drawM(isc.strumento, 46, 478);
+
+  // Checkboxes
+  checkM(isc.acc_tesseramento, 47, 548);
+  checkM(isc.acc_regolamento,  47, 566);
+  checkM(isc.acc_privacy,      47, 584);
+  checkM(isc.acc_immagini,     47, 602);
+
+  // Data firma
+  drawM(`Treviso, ${fmtData(isc.created_at)}`, 31, 653, { size: 8.5 });
+
+  // Firma allievo
+  const firmaAllImg = await embedFirma(modIscDoc, isc.firma_allievo);
+  if (firmaAllImg) {
+    pageModulo.drawImage(firmaAllImg, { x: 31, y: py(653, 0) - 52, width: 170, height: 48 });
+  }
+  // Firma presidente
+  if (withPresidente) {
+    const firmaPres = await embedFirma(modIscDoc, isc.firma_presidente);
+    if (firmaPres) {
+      pageModulo.drawImage(firmaPres, { x: 298, y: py(653, 0) - 52, width: 170, height: 48 });
+    }
+  }
+
+  const modIscFinal = await modIscDoc.save();
+
+  // ── 2. Informativa Privacy — overlay su template ────────────────────────
+  const privacyBytes = fs.readFileSync(path.join(TEMPLATE_DIR, 'AMA_Informativa_Privacy.pdf'));
+  const privacyDoc = await PdfLib.load(privacyBytes);
+  const [pagePrivacy] = privacyDoc.getPages();
+  const fontP  = await privacyDoc.embedFont(StandardFonts.Helvetica);
+  const fontPB = await privacyDoc.embedFont(StandardFonts.HelveticaBold);
+
+  const checkP = (val, x, ppy) => {
+    if (!val) return;
+    pagePrivacy.drawText('X', { x: x + 1, y: py(ppy, 9), size: 9, font: fontPB, color: NAVY });
+  };
+
+  checkP(isc.acc_privacy,  47, 506);
+  checkP(isc.acc_immagini, 47, 524);
+
+  pagePrivacy.drawText(`Treviso, ${fmtData(isc.created_at)}`, {
+    x: 31, y: py(594, 8.5), size: 8.5, font: fontP, color: BLACK,
+  });
+
+  const firmaAllPriv = await embedFirma(privacyDoc, isc.firma_allievo);
+  if (firmaAllPriv) {
+    pagePrivacy.drawImage(firmaAllPriv, { x: 298, y: py(594, 0) - 45, width: 170, height: 42 });
+  }
+
+  const privacyFinal = await privacyDoc.save();
+
+  // ── 3. Regolamento — generato con PDFKit ───────────────────────────────
+  const regolamentoBuffer = await generaRegolamentoPDFKit(isc);
+
+  // ── 4. Allegati documenti — generati con PDFKit ─────────────────────────
+  const allegatiList = [
+    { label: "Documento d'identità allievo/a — fronte", b64: isc.doc_allievo_fronte },
+    { label: "Documento d'identità allievo/a — retro",  b64: isc.doc_allievo_retro },
+    { label: "Documento d'identità genitore — fronte",  b64: isc.doc_genitore_fronte },
+    { label: "Documento d'identità genitore — retro",   b64: isc.doc_genitore_retro },
+  ].filter(a => a.b64);
+
+  let allegatiBuffer = null;
+  if (allegatiList.length > 0) {
+    allegatiBuffer = await new Promise((resolve, reject) => {
+      const doc = new PDFDocument({ size: 'A4', margin: 0, autoFirstPage: false });
+      const chunks = [];
+      doc.on('data', c => chunks.push(c));
+      doc.on('end', () => resolve(Buffer.concat(chunks)));
+      doc.on('error', reject);
+      const LM = 30.5, LW = 534;
+      for (const all of allegatiList) {
+        doc.addPage({ size: 'A4', margin: 0 });
+        doc.rect(0, 0, 595, 60.5).fill('#f0f0f0');
+        doc.fontSize(7).font('Helvetica-Bold').fillColor('#1e3a5f')
+          .text('MODULO UFFICIALE · AMA ACADEMY OF MUSICAL ARTS', LM, 74, { width: LW });
+        doc.fontSize(12).font('Helvetica-Bold').fillColor('#1e3a5f')
+          .text('Allegati — Copie Documenti Identità', LM, 90, { width: LW });
+        doc.fontSize(9).font('Helvetica').fillColor('#555')
+          .text(all.label, LM, 115, { width: LW });
+        doc.moveTo(LM, 130).lineTo(LM + LW, 130).strokeColor('#1e3a5f').lineWidth(0.6).stroke();
+        try {
+          const data = all.b64.replace(/^data:image\/\w+;base64,/, '');
+          doc.image(Buffer.from(data, 'base64'), LM, 145, { fit: [LW, 520], align: 'center' });
+        } catch {}
+        doc.rect(0, 681, 595, 30).fill('#f0f0f0');
+        doc.fontSize(6).font('Helvetica').fillColor('#555')
+          .text('AMA · Academy of Musical Arts   Viale Felissent, 14 – Treviso   amamusicacademy.it', 0, 694, { align: 'center', width: 595 });
+      }
+      doc.end();
+    });
+  }
+
+  // ── 5. Unisci tutto con pdf-lib ─────────────────────────────────────────
+  const merged = await PdfLib.create();
+  for (const pdfBytes of [modIscFinal, privacyFinal, regolamentoBuffer, allegatiBuffer].filter(Boolean)) {
+    const src = await PdfLib.load(pdfBytes);
+    const pages = await merged.copyPages(src, src.getPageIndices());
+    pages.forEach(p => merged.addPage(p));
+  }
+
+  return Buffer.from(await merged.save());
 }
 
 // ── Invio email ─────────────────────────────────────────────────────────────
