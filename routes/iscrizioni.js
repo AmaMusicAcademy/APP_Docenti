@@ -365,22 +365,44 @@ async function generatePDF(isc, { withPresidente = false } = {}) {
   checkP(isc.acc_privacy,  47, 506);
   checkP(isc.acc_immagini, 47, 524);
 
+  // Riga firma privacy: RECT a pdfplumber y=586.1 → pdf-lib y=255.9
+  const PRIV_LINE_Y = 842 - 586.1; // = 255.9
+  const PRIV_FIRMA_H = 36;
+
   pagePrivacy.drawText(`Treviso, ${fmtData(isc.created_at)}`, {
-    x: 31, y: py(594, 8.5), size: 8.5, font: fontP, color: BLACK,
+    x: 31, y: PRIV_LINE_Y, size: 8.5, font: fontP, color: BLACK,
   });
 
-  // La riga firma privacy è a pdfplumber y≈630 (linea sotto la label a y=594.1)
-  // posiziono la firma SOPRA la label label "FIRMA ALLIEVO / GENITORE" (y=594.1)
-  const PRIV_FIRMA_LINE_Y = py(594, 0); // pdf-lib y della label = punto base firma
   const firmaAllPriv = await embedFirma(privacyDoc, isc.firma_allievo);
   if (firmaAllPriv) {
-    pagePrivacy.drawImage(firmaAllPriv, { x: 298, y: PRIV_FIRMA_LINE_Y, width: 170, height: 36 });
+    pagePrivacy.drawImage(firmaAllPriv, { x: 298, y: PRIV_LINE_Y, width: 170, height: PRIV_FIRMA_H });
   }
 
   const privacyFinal = await privacyDoc.save();
 
-  // ── 3. Regolamento — generato con PDFKit ───────────────────────────────
-  const regolamentoBuffer = await generaRegolamentoPDFKit(isc);
+  // ── 3. Regolamento — overlay su template ──────────────────────────────
+  const regBytes = fs.readFileSync(path.join(TEMPLATE_DIR, 'AMA_Regolamento_Interno.pdf'));
+  const regDoc = await PdfLib.load(regBytes);
+  const pages = regDoc.getPages();
+  const lastPage = pages[pages.length - 1]; // firma sulla pagina finale
+  const fontR  = await regDoc.embedFont(StandardFonts.Helvetica);
+
+  // Riga firma regolamento: RECT a pdfplumber y=700.2 → pdf-lib y=141.8
+  const REG_LINE_Y = 842 - 700.2; // = 141.8
+  const REG_FIRMA_H = 38;
+
+  // Data "Luogo e data"
+  lastPage.drawText(`Treviso, ${fmtData(isc.created_at)}`, {
+    x: 31, y: REG_LINE_Y, size: 8.5, font: fontR, color: BLACK,
+  });
+
+  // Firma allievo/richiedente
+  const firmaAllReg = await embedFirma(regDoc, isc.firma_allievo);
+  if (firmaAllReg) {
+    lastPage.drawImage(firmaAllReg, { x: 298, y: REG_LINE_Y, width: 170, height: REG_FIRMA_H });
+  }
+
+  const regolamentoBuffer = await regDoc.save();
 
   // ── 4. Allegati documenti — generati con PDFKit ─────────────────────────
   const allegatiList = [
@@ -425,8 +447,8 @@ async function generatePDF(isc, { withPresidente = false } = {}) {
   const merged = await PdfLib.create();
   for (const pdfBytes of [modIscFinal, privacyFinal, regolamentoBuffer, allegatiBuffer].filter(Boolean)) {
     const src = await PdfLib.load(pdfBytes);
-    const pages = await merged.copyPages(src, src.getPageIndices());
-    pages.forEach(p => merged.addPage(p));
+    const srcPages = await merged.copyPages(src, src.getPageIndices());
+    srcPages.forEach(p => merged.addPage(p));
   }
 
   return Buffer.from(await merged.save());
