@@ -212,18 +212,39 @@ function generaRegolamentoPDFKit(isc) {
 
     // Firma per presa visione
     doc.moveDown(0.8);
-    if (doc.y > 600) nuovaPagina('Regolamento Interno (continua)', `Anno accademico ${anno}`);
+    if (doc.y > 580) nuovaPagina('Regolamento Interno (continua)', `Anno accademico ${anno}`);
     doc.moveTo(M, doc.y).lineTo(M + W, doc.y).strokeColor('#c0c8d8').lineWidth(0.4).stroke();
-    doc.moveDown(0.4);
+    doc.moveDown(0.5);
+
+    const firmaY = doc.y;
+
+    // Firma allievo/genitore
     doc.fontSize(8).font('Helvetica-Bold').fillColor('#1e3a5f')
-      .text('PER PRESA VISIONE — ALLIEVO / GENITORE', M, doc.y, { width: 260, continued: false });
-    doc.fontSize(8).font('Helvetica-Bold').fillColor('#1e3a5f')
-      .text('FIRMA DEL PRESIDENTE', M + 280, doc.y - 9.5, { width: 260 });
-    doc.moveDown(0.3);
+      .text('PER PRESA VISIONE — ALLIEVO / GENITORE', M, firmaY, { width: 250 });
     doc.fontSize(8).font('Helvetica').fillColor('#555')
-      .text(`Treviso, ${fmtData(isc.created_at)}`, M, doc.y, { width: 260 });
-    doc.moveTo(M, doc.y + 40).lineTo(M + 240, doc.y + 40).strokeColor('#c0c8d8').lineWidth(0.4).stroke();
-    doc.moveTo(M + 280, doc.y).lineTo(M + 280 + 240, doc.y).strokeColor('#c0c8d8').lineWidth(0.4).stroke();
+      .text(`Treviso, ${fmtData(isc.created_at)}`, M, firmaY + 12, { width: 250 });
+
+    // Immagine firma allievo (se presente)
+    if (isc.firma_allievo) {
+      try {
+        const b64 = isc.firma_allievo.replace(/^data:image\/\w+;base64,/, '');
+        doc.image(Buffer.from(b64, 'base64'), M, firmaY + 24, { fit: [200, 38] });
+      } catch {}
+    }
+    // Riga firma allievo
+    doc.moveTo(M, firmaY + 66).lineTo(M + 240, firmaY + 66).strokeColor('#c0c8d8').lineWidth(0.4).stroke();
+
+    // Firma presidente
+    doc.fontSize(8).font('Helvetica-Bold').fillColor('#1e3a5f')
+      .text('FIRMA DEL PRESIDENTE', M + 280, firmaY, { width: 250 });
+    if (isc.firma_presidente) {
+      try {
+        const b64 = isc.firma_presidente.replace(/^data:image\/\w+;base64,/, '');
+        doc.image(Buffer.from(b64, 'base64'), M + 280, firmaY + 24, { fit: [200, 38] });
+      } catch {}
+    }
+    // Riga firma presidente
+    doc.moveTo(M + 280, firmaY + 66).lineTo(M + 280 + 240, firmaY + 66).strokeColor('#c0c8d8').lineWidth(0.4).stroke();
 
     doc.end();
   });
@@ -267,6 +288,16 @@ async function generatePDF(isc, { withPresidente = false } = {}) {
     pageModulo.drawText('X', { x: x + 1, y: py(ppy, 9), size: 9, font: fontMB, color: NAVY });
   };
 
+  // Helper: rettangolo bianco per coprire testo template
+  const whiteM = (x, ppy, w, h) => pageModulo.drawRectangle({
+    x, y: py(ppy, 0) - h, width: w, height: h + 2,
+    color: rgb(1, 1, 1), borderWidth: 0,
+  });
+
+  // ── Data "Presentata il" (copre il placeholder ____/____/2026) ──
+  whiteM(175, 111, 90, 11);
+  drawM(fmtData(isc.created_at), 175, 111, { size: 9 });
+
   // Allievo
   drawM(`${isc.nome} ${isc.cognome}`, 46, 190);
   drawM(isc.codice_fiscale, 347, 190);
@@ -285,8 +316,14 @@ async function generatePDF(isc, { withPresidente = false } = {}) {
     drawM(isc.genitore_email, 347, 398);
   }
 
-  // Corso
-  drawM(isc.strumento, 46, 478);
+  // ── Sezione corso ───────────────────────────────────────────────────────
+  // Copri "DURATA LEZIONE" e "INSEGNANTE (SE RICHIESTO)" dal template
+  whiteM(217, 467.7, 360, 11); // copre entrambe le label
+  // Scrivi nuova label "EROGAZIONE LIBERALE MENSILE" e corsi
+  drawM('EROGAZIONE LIBERALE MENSILE', 217, 467.7, { size: 7.5, bold: true, color: NAVY });
+  drawM(isc.strumento, 46, 479);
+  const quotaMensile = isc.quota_mensile || calcolaQuotaMensile(isc.strumento);
+  drawM(`€ ${quotaMensile},00 / mese`, 217, 479);
 
   // Checkboxes
   checkM(isc.acc_tesseramento, 47, 548);
@@ -294,19 +331,20 @@ async function generatePDF(isc, { withPresidente = false } = {}) {
   checkM(isc.acc_privacy,      47, 584);
   checkM(isc.acc_immagini,     47, 602);
 
-  // Data firma
-  drawM(`Treviso, ${fmtData(isc.created_at)}`, 31, 653, { size: 8.5 });
+  // ── Firma ───────────────────────────────────────────────────────────────
+  // La riga firma nel template è a pdfplumber y≈653.5 → pdf-lib y=188.5
+  // Posizionare l'immagine firma SOPRA la riga (y dal basso = 188.5, altezza 40)
+  const FIRMA_LINE_Y = 188.5; // pdf-lib y della riga firma (= py(653.5, 0))
+  const FIRMA_H = 38;
 
-  // Firma allievo
   const firmaAllImg = await embedFirma(modIscDoc, isc.firma_allievo);
   if (firmaAllImg) {
-    pageModulo.drawImage(firmaAllImg, { x: 31, y: py(653, 0) - 52, width: 170, height: 48 });
+    pageModulo.drawImage(firmaAllImg, { x: 31, y: FIRMA_LINE_Y, width: 170, height: FIRMA_H });
   }
-  // Firma presidente
   if (withPresidente) {
     const firmaPres = await embedFirma(modIscDoc, isc.firma_presidente);
     if (firmaPres) {
-      pageModulo.drawImage(firmaPres, { x: 298, y: py(653, 0) - 52, width: 170, height: 48 });
+      pageModulo.drawImage(firmaPres, { x: 298, y: FIRMA_LINE_Y, width: 170, height: FIRMA_H });
     }
   }
 
@@ -331,9 +369,12 @@ async function generatePDF(isc, { withPresidente = false } = {}) {
     x: 31, y: py(594, 8.5), size: 8.5, font: fontP, color: BLACK,
   });
 
+  // La riga firma privacy è a pdfplumber y≈630 (linea sotto la label a y=594.1)
+  // posiziono la firma SOPRA la label label "FIRMA ALLIEVO / GENITORE" (y=594.1)
+  const PRIV_FIRMA_LINE_Y = py(594, 0); // pdf-lib y della label = punto base firma
   const firmaAllPriv = await embedFirma(privacyDoc, isc.firma_allievo);
   if (firmaAllPriv) {
-    pagePrivacy.drawImage(firmaAllPriv, { x: 298, y: py(594, 0) - 45, width: 170, height: 42 });
+    pagePrivacy.drawImage(firmaAllPriv, { x: 298, y: PRIV_FIRMA_LINE_Y, width: 170, height: 36 });
   }
 
   const privacyFinal = await privacyDoc.save();
