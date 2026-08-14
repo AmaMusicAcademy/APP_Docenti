@@ -215,8 +215,8 @@ router.post('/lezioni', authenticateToken, async (req, res) => {
     }
 
     const insert = await pool.query(
-      `INSERT INTO lezioni (id_insegnante, id_allievo, gruppo_id, nome_gruppo, tipo, data, ora_inizio, ora_fine, aula, stato, motivazione, riprogrammata, anno_accademico)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,false,$12) RETURNING *`,
+      `INSERT INTO lezioni (id_insegnante, id_allievo, gruppo_id, nome_gruppo, tipo, data, ora_inizio, ora_fine, aula, stato, motivazione, riprogrammata)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,false) RETURNING *`,
       [
         id_insegnante,
         isCollettiva ? null : id_allievo,
@@ -224,7 +224,6 @@ router.post('/lezioni', authenticateToken, async (req, res) => {
         isCollettiva ? nomeGruppo : null,
         isCollettiva ? 'collettiva' : 'individuale',
         data, ora_inizio, ora_fine, aula, stato, motivazione,
-        getAnnoAccademico(),
       ]
     );
     const row = insert.rows[0];
