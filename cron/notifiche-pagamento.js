@@ -11,22 +11,28 @@ webpush.setVapidDetails(
 const MESI = ['','Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno',
                'Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'];
 
-// Costruisce il messaggio per i mesi arretrati
-function buildMessaggio(mesiArretrati, primoDelMese = false) {
-  const etichette = mesiArretrati.map(({ anno: a, mese: m }) => `${MESI[m]} ${a}`).join(', ');
+// Costruisce il messaggio del 1° del mese:
+// include sempre il mese corrente (da pagare entro la prima lezione)
+// + eventuali mesi arretrati dei mesi precedenti
+function buildMessaggioPrimoMese(meseCorrente, annoCorrente, arretrati) {
+  const meseLabel = `${MESI[meseCorrente]} ${annoCorrente}`;
+  let msg = `È iniziato ${meseLabel}! Ricorda che la quota mensile va saldata entro la prima lezione del mese.`;
 
-  if (primoDelMese) {
-    if (mesiArretrati.length === 1) {
-      const { anno: a, mese: m } = mesiArretrati[0];
-      return `Inizio mese: la quota di ${MESI[m]} ${a} non risulta ancora registrata. ` +
-        `Puoi regolarizzare direttamente dalla tua area personale. Grazie!`;
-    }
-    return `Inizio mese: le quote di ${etichette} non risultano ancora registrate. ` +
-      `Ti invitiamo a regolarizzare la tua posizione dall'area personale. Grazie!`;
+  if (arretrati.length > 0) {
+    const etichette = arretrati.map(({ anno: a, mese: m }) => `${MESI[m]} ${a}`).join(', ');
+    msg += ` Hai inoltre ${arretrati.length === 1 ? 'una quota arretrata' : 'quote arretrate'} da regolarizzare: ${etichette}.`;
   }
 
-  if (mesiArretrati.length === 1) {
-    const { anno: a, mese: m } = mesiArretrati[0];
+  msg += ' Puoi pagare direttamente dalla tua area personale. Grazie!';
+  return msg;
+}
+
+// Costruisce il messaggio di promemoria settimanale (solo arretrati)
+function buildMessaggioPromemoria(arretrati) {
+  const etichette = arretrati.map(({ anno: a, mese: m }) => `${MESI[m]} ${a}`).join(', ');
+
+  if (arretrati.length === 1) {
+    const { anno: a, mese: m } = arretrati[0];
     return `Gentile allievo, ti ricordiamo che la quota mensile di ${MESI[m]} ${a} non risulta ancora registrata. ` +
       `Ti chiediamo gentilmente di provvedere alla regolarizzazione nei prossimi giorni. Grazie per la tua collaborazione!`;
   }
@@ -106,24 +112,35 @@ async function inviaNotifichePagamento(primoDelMese = false) {
         }
       }
 
-      if (arretrati.length === 0) continue;
-
-      // Il 1° del mese invia sempre; i lunedì evitano duplicati nella stessa settimana
-      if (!primoDelMese) {
-        const inizioSettimana = new Date(now);
-        inizioSettimana.setDate(now.getDate() - now.getDay());
-        inizioSettimana.setHours(0, 0, 0, 0);
-
-        const { rows: giàInviata } = await pool.query(
-          `SELECT 1 FROM notifiche
-           WHERE dest_id = $1 AND tipo = 'pagamento_mancante'
-             AND created_at >= $2 LIMIT 1`,
-          [allievo.id, inizioSettimana.toISOString()]
+      // 1° del mese: notifica sempre (anche senza arretrati — include il mese corrente)
+      // Lunedì: notifica solo se ci sono arretrati e non già inviata questa settimana
+      if (primoDelMese) {
+        const messaggio = buildMessaggioPrimoMese(meseCorrente, annoCorrente, arretrati);
+        await pool.query(
+          `INSERT INTO notifiche (dest_id, tipo, messaggio) VALUES ($1, 'pagamento_mancante', $2)`,
+          [allievo.id, messaggio]
         );
-        if (giàInviata.length > 0) continue;
+        await inviaPush(allievo.id, '💳 Quota mensile', messaggio);
+        totaleNotifiche++;
+        continue;
       }
 
-      const messaggio = buildMessaggio(arretrati, primoDelMese);
+      // Lunedì — solo se ci sono arretrati
+      if (arretrati.length === 0) continue;
+
+      const inizioSettimana = new Date(now);
+      inizioSettimana.setDate(now.getDate() - now.getDay());
+      inizioSettimana.setHours(0, 0, 0, 0);
+
+      const { rows: giàInviata } = await pool.query(
+        `SELECT 1 FROM notifiche
+         WHERE dest_id = $1 AND tipo = 'pagamento_mancante'
+           AND created_at >= $2 LIMIT 1`,
+        [allievo.id, inizioSettimana.toISOString()]
+      );
+      if (giàInviata.length > 0) continue;
+
+      const messaggio = buildMessaggioPromemoria(arretrati);
       await pool.query(
         `INSERT INTO notifiche (dest_id, tipo, messaggio) VALUES ($1, 'pagamento_mancante', $2)`,
         [allievo.id, messaggio]
