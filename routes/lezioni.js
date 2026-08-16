@@ -81,8 +81,9 @@ const parseHistory = (v) => {
 };
 
 const TITOLI_PUSH = {
-  lezione_annullata: '❌ Lezione annullata',
-  lezione_rimandato: '🔄 Lezione spostata',
+  lezione_annullata:    '❌ Lezione annullata',
+  lezione_rimandata:    '🔄 Lezione rinviata',
+  lezione_riprogrammata:'📅 Lezione riprogrammata',
 };
 
 async function creaNotificaLezione(id_allievo, tipo, messaggio) {
@@ -92,11 +93,28 @@ async function creaNotificaLezione(id_allievo, tipo, messaggio) {
        VALUES ($1, $2, $3)`,
       [id_allievo, tipo, messaggio]
     );
-    // Push contestuale
     const titolo = TITOLI_PUSH[tipo] || '📚 Accademia Musicale';
     await inviaPush(id_allievo, titolo, messaggio);
   } catch (err) {
     console.error('Errore creazione notifica:', err);
+  }
+}
+
+// Notifica tutti gli allievi coinvolti in una lezione (individuale o collettiva)
+async function notificaAllieviLezione(lezione, tipo, messaggio) {
+  const ids = new Set();
+  if (lezione.id_allievo) ids.add(lezione.id_allievo);
+  if (lezione.gruppo_id) {
+    try {
+      const { rows } = await pool.query(
+        `SELECT allievo_id FROM lezioni_partecipanti WHERE lezione_id = $1`,
+        [lezione.id]
+      );
+      rows.forEach(r => ids.add(r.allievo_id));
+    } catch {}
+  }
+  for (const id of ids) {
+    await creaNotificaLezione(id, tipo, messaggio);
   }
 }
 
@@ -351,6 +369,21 @@ router.put('/lezioni/:id', authenticateToken, async (req, res) => {
         id,
       ]
     );
+
+    // Notifica se data/ora/aula è cambiata
+    if (scheduleChanged) {
+      const nuovaData = dateOnly(newData);
+      const tipo = newStato === 'annullata' ? 'lezione_annullata'
+                 : newStato === 'rimandata' ? 'lezione_rimandata'
+                 : 'lezione_riprogrammata';
+      const msg  = newStato === 'annullata'
+        ? `La lezione del ${dateOnly(cur.data)} è stata annullata${motivazione ? ': ' + motivazione : '.'}`
+        : newStato === 'rimandata'
+        ? `La lezione del ${dateOnly(cur.data)} è stata rinviata${motivazione ? ': ' + motivazione : '. Verrai contattato per la riprogrammazione.'}`
+        : `La lezione è stata spostata al ${nuovaData} dalle ${hhmm(newInizio)} alle ${hhmm(newFine)} (aula ${newAula}).`;
+      await notificaAllieviLezione({ ...cur, id: parseInt(id) }, tipo, msg);
+    }
+
     res.json(rows[0]);
   } catch (err) {
     console.error(err);
@@ -377,15 +410,12 @@ router.patch('/lezioni/:id/rimanda', authenticateToken, async (req, res) => {
       [motivazione, id]
     );
 
-    // Notifica all'allievo
-    if (cur.id_allievo) {
-      const dataStr = update.rows[0].data_str || dateOnly(cur.data);
-      await creaNotificaLezione(
-        cur.id_allievo,
-        'lezione_rimandata',
-        `La tua lezione del ${dataStr} è stata rimandata${motivazione ? ': ' + motivazione : '.'}`
-      );
-    }
+    const dataStr = update.rows[0].data_str || dateOnly(cur.data);
+    await notificaAllieviLezione(
+      cur,
+      'lezione_rimandata',
+      `La lezione del ${dataStr} è stata rinviata${motivazione ? ': ' + motivazione : '. Verrai contattato per la riprogrammazione.'}`
+    );
 
     res.json(update.rows[0]);
   } catch (err) {
@@ -413,15 +443,12 @@ router.patch('/lezioni/:id/annulla', authenticateToken, async (req, res) => {
       [motivazione, id]
     );
 
-    // Notifica all'allievo
-    if (cur.id_allievo) {
-      const dataStr = update.rows[0].data_str || dateOnly(cur.data);
-      await creaNotificaLezione(
-        cur.id_allievo,
-        'lezione_annullata',
-        `La tua lezione del ${dataStr} è stata annullata${motivazione ? ': ' + motivazione : '.'}`
-      );
-    }
+    const dataStr = update.rows[0].data_str || dateOnly(cur.data);
+    await notificaAllieviLezione(
+      cur,
+      'lezione_annullata',
+      `La lezione del ${dataStr} è stata annullata${motivazione ? ': ' + motivazione : '.'}`
+    );
 
     res.json(update.rows[0]);
   } catch (err) {
@@ -526,6 +553,12 @@ router.patch('/lezioni/:id/riprogramma', authenticateToken, async (req, res) => 
        WHERE id=$6
        RETURNING *, TO_CHAR(data,'YYYY-MM-DD') AS data`,
       [data, ora_inizio, ora_fine, aula, JSON.stringify([...history, logEntry]), id]
+    );
+
+    await notificaAllieviLezione(
+      cur,
+      'lezione_riprogrammata',
+      `La lezione rinviata è stata riprogrammata per il ${data} dalle ${hhmm(ora_inizio)} alle ${hhmm(ora_fine)} (aula ${aula}).`
     );
 
     res.json(rows[0]);
