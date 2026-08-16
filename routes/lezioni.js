@@ -377,9 +377,9 @@ router.put('/lezioni/:id', authenticateToken, async (req, res) => {
                  : newStato === 'rimandata' ? 'lezione_rimandata'
                  : 'lezione_riprogrammata';
       const msg  = newStato === 'annullata'
-        ? `La lezione del ${dateOnly(cur.data)} è stata annullata${motivazione ? ': ' + motivazione : '.'}`
+        ? `La lezione del ${dateOnly(cur.data)} è stata annullata.`
         : newStato === 'rimandata'
-        ? `La lezione del ${dateOnly(cur.data)} è stata rinviata${motivazione ? ': ' + motivazione : '. Verrai contattato per la riprogrammazione.'}`
+        ? `La lezione del ${dateOnly(cur.data)} è stata rinviata. Verrai contattato per la riprogrammazione.`
         : `La lezione è stata spostata al ${nuovaData} dalle ${hhmm(newInizio)} alle ${hhmm(newFine)} (aula ${newAula}).`;
       await notificaAllieviLezione({ ...cur, id: parseInt(id) }, tipo, msg);
     }
@@ -414,7 +414,7 @@ router.patch('/lezioni/:id/rimanda', authenticateToken, async (req, res) => {
     await notificaAllieviLezione(
       cur,
       'lezione_rimandata',
-      `La lezione del ${dataStr} è stata rinviata${motivazione ? ': ' + motivazione : '. Verrai contattato per la riprogrammazione.'}`
+      `La lezione del ${dataStr} è stata rinviata. Verrai contattato per la riprogrammazione.`
     );
 
     res.json(update.rows[0]);
@@ -447,7 +447,7 @@ router.patch('/lezioni/:id/annulla', authenticateToken, async (req, res) => {
     await notificaAllieviLezione(
       cur,
       'lezione_annullata',
-      `La lezione del ${dataStr} è stata annullata${motivazione ? ': ' + motivazione : '.'}`
+      `La lezione del ${dataStr} è stata annullata.`
     );
 
     res.json(update.rows[0]);
