@@ -12,9 +12,18 @@ const MESI = ['','Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno',
                'Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'];
 
 // Costruisce il messaggio per i mesi arretrati
-function buildMessaggio(mesiArretrati, anno) {
-  const now = new Date();
-  const annoCorrente = now.getFullYear();
+function buildMessaggio(mesiArretrati, primoDelMese = false) {
+  const etichette = mesiArretrati.map(({ anno: a, mese: m }) => `${MESI[m]} ${a}`).join(', ');
+
+  if (primoDelMese) {
+    if (mesiArretrati.length === 1) {
+      const { anno: a, mese: m } = mesiArretrati[0];
+      return `Inizio mese: la quota di ${MESI[m]} ${a} non risulta ancora registrata. ` +
+        `Puoi regolarizzare direttamente dalla tua area personale. Grazie!`;
+    }
+    return `Inizio mese: le quote di ${etichette} non risultano ancora registrate. ` +
+      `Ti invitiamo a regolarizzare la tua posizione dall'area personale. Grazie!`;
+  }
 
   if (mesiArretrati.length === 1) {
     const { anno: a, mese: m } = mesiArretrati[0];
@@ -22,7 +31,6 @@ function buildMessaggio(mesiArretrati, anno) {
       `Ti chiediamo gentilmente di provvedere alla regolarizzazione nei prossimi giorni. Grazie per la tua collaborazione!`;
   }
 
-  const etichette = mesiArretrati.map(({ anno: a, mese: m }) => `${MESI[m]} ${a}`).join(', ');
   return `Gentile allievo, ti ricordiamo che le quote mensili di ${etichette} non risultano ancora registrate. ` +
     `Ti invitiamo a regolarizzare la tua posizione il prima possibile per continuare a godere serenamente delle lezioni. ` +
     `Siamo a tua disposizione per qualsiasi informazione. Grazie!`;
@@ -55,7 +63,7 @@ async function inviaPush(allievoId, titolo, corpo) {
   } catch {}
 }
 
-async function inviaNotifichePagamento() {
+async function inviaNotifichePagamento(primoDelMese = false) {
   const now = new Date();
   const annoCorrente = now.getFullYear();
   const meseCorrente = now.getMonth() + 1;
@@ -100,21 +108,22 @@ async function inviaNotifichePagamento() {
 
       if (arretrati.length === 0) continue;
 
-      // Controlla se già inviata una notifica mensile questa settimana
-      const inizioSettimana = new Date(now);
-      inizioSettimana.setDate(now.getDate() - now.getDay());
-      inizioSettimana.setHours(0, 0, 0, 0);
+      // Il 1° del mese invia sempre; i lunedì evitano duplicati nella stessa settimana
+      if (!primoDelMese) {
+        const inizioSettimana = new Date(now);
+        inizioSettimana.setDate(now.getDate() - now.getDay());
+        inizioSettimana.setHours(0, 0, 0, 0);
 
-      const { rows: giàInviata } = await pool.query(
-        `SELECT 1 FROM notifiche
-         WHERE dest_id = $1 AND tipo = 'pagamento_mancante'
-           AND created_at >= $2 LIMIT 1`,
-        [allievo.id, inizioSettimana.toISOString()]
-      );
+        const { rows: giàInviata } = await pool.query(
+          `SELECT 1 FROM notifiche
+           WHERE dest_id = $1 AND tipo = 'pagamento_mancante'
+             AND created_at >= $2 LIMIT 1`,
+          [allievo.id, inizioSettimana.toISOString()]
+        );
+        if (giàInviata.length > 0) continue;
+      }
 
-      if (giàInviata.length > 0) continue;
-
-      const messaggio = buildMessaggio(arretrati, annoCorrente);
+      const messaggio = buildMessaggio(arretrati, primoDelMese);
       await pool.query(
         `INSERT INTO notifiche (dest_id, tipo, messaggio) VALUES ($1, 'pagamento_mancante', $2)`,
         [allievo.id, messaggio]
@@ -173,9 +182,13 @@ async function inviaNotifichePagamento() {
 }
 
 function avviaCron() {
-  // Ogni lunedì alle 09:00  (sec min hour dom month dow)
-  schedule.scheduleJob('0 9 * * 1', inviaNotifichePagamento);
-  console.log('[CRON] Notifiche pagamento programmate ogni lunedì alle 09:00');
+  // 1° del mese alle 09:00 — notifica di inizio mese con arretrati
+  schedule.scheduleJob('0 9 1 * *', () => inviaNotifichePagamento(true).catch(console.error));
+  console.log('[CRON] Notifiche pagamento: 1° del mese alle 09:00');
+
+  // Ogni lunedì alle 09:00 — promemoria settimanale per chi ha ancora arretrati
+  schedule.scheduleJob('0 9 * * 1', () => inviaNotifichePagamento(false).catch(console.error));
+  console.log('[CRON] Notifiche pagamento: ogni lunedì alle 09:00');
 }
 
 module.exports = { avviaCron, inviaNotifichePagamento };
