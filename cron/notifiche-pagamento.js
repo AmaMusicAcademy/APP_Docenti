@@ -99,12 +99,13 @@ async function inviaNotifichePagamento(primoDelMese = false) {
       );
       const pagatiSet = new Set(pagamenti.map(p => `${p.anno}-${p.mese}`));
 
-      // Trova mesi arretrati (dal mese di iscrizione al mese precedente a quello corrente)
+      // Trova mesi arretrati.
+      // Il 1° del mese esclude il mese corrente (viene gestito separatamente nel messaggio).
+      // Il lunedì include il mese corrente: il saldo doveva avvenire entro la prima lezione.
       const arretrati = [];
       for (let y = y0; y <= annoCorrente; y++) {
         const mStart = y === y0 ? m0 : 1;
-        // Non includere il mese corrente (ancora in corso)
-        const mEnd = y === annoCorrente ? meseCorrente - 1 : 12;
+        const mEnd = y === annoCorrente ? (primoDelMese ? meseCorrente - 1 : meseCorrente) : 12;
         for (let m = mStart; m <= mEnd; m++) {
           if (!pagatiSet.has(`${y}-${m}`)) {
             arretrati.push({ anno: y, mese: m });
