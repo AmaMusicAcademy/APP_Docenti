@@ -393,8 +393,6 @@ router.post('/allievo/push-subscribe', ...requireRole('allievo'), async (req, re
        ON CONFLICT (allievo_id, endpoint) DO UPDATE SET keys = $3`,
       [req.user.allievoId, endpoint, JSON.stringify(keys)]
     );
-    // Push di conferma iscrizione
-    await inviaPushAllievo(req.user.allievoId, '🔔 Notifiche attive', 'Riceverai aggiornamenti su pagamenti e lezioni direttamente qui.');
     res.json({ ok: true });
   } catch (err) { console.error(err); res.status(500).json({ error: 'Errore' }); }
 });
