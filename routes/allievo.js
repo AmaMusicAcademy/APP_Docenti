@@ -161,7 +161,22 @@ router.get('/allievo/pagamenti', ...requireRole('allievo'), async (req, res) => 
     const { rows: subRow } = await pool.query(
       'SELECT stripe_subscription_id FROM allievi WHERE id=$1', [id]
     );
-    const abbonamentoAttivo = !!(subRow[0]?.stripe_subscription_id);
+    let abbonamentoAttivo = false;
+    const subId = subRow[0]?.stripe_subscription_id;
+    if (subId) {
+      try {
+        const Stripe = require('stripe');
+        const stripe = Stripe(process.env.STRIPE_SECRET_KEY);
+        const sub = await stripe.subscriptions.retrieve(subId);
+        abbonamentoAttivo = sub.status === 'active' || sub.status === 'trialing';
+        if (!abbonamentoAttivo) {
+          // Pulisce il riferimento se il sub è cancellato/scaduto
+          await pool.query('UPDATE allievi SET stripe_subscription_id=NULL WHERE id=$1', [id]);
+        }
+      } catch {
+        abbonamentoAttivo = false;
+      }
+    }
 
     res.json({ quota_mensile, pagamenti: mesi, abbonamentoAttivo });
   } catch (err) {

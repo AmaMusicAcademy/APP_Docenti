@@ -178,6 +178,17 @@ router.post('/stripe/webhook', express.raw({ type: 'application/json' }), async 
       }
     }
 
+    if (event.type === 'customer.subscription.deleted' || event.type === 'customer.subscription.updated') {
+      const sub = event.data.object;
+      if (sub.status !== 'active' && sub.status !== 'trialing') {
+        await pool.query(
+          `UPDATE allievi SET stripe_subscription_id=NULL WHERE stripe_subscription_id=$1`,
+          [sub.id]
+        ).catch(() => {});
+        console.log(`[Stripe] Abbonamento ${sub.id} cancellato/scaduto — rimosso dal DB`);
+      }
+    }
+
     if (event.type === 'invoice.payment_succeeded') {
       const invoice = event.data.object;
       const sub = invoice.subscription
