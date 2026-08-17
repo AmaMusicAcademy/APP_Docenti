@@ -362,8 +362,8 @@ router.get('/allievo/pagamenti-arretrati', ...requireRole('allievo'), async (req
     const start = dataIsc > settembreAA ? dataIsc : settembreAA;
     const arretrati = [];
     let cur = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), 1));
-    // fino al mese corrente incluso
-    const limiteMese = new Date(Date.UTC(nowY, nowM - 1, 1));
+    // fino al mese corrente incluso (il saldo va fatto entro la prima lezione del mese)
+    const limiteMese = new Date(Date.UTC(nowY, nowM, 1));
 
     while (cur < limiteMese) {
       const a = cur.getUTCFullYear(), m = cur.getUTCMonth() + 1;
