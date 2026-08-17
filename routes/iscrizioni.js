@@ -474,7 +474,11 @@ async function inviaEmailDirezione(isc, pdfBuffer) {
 
 async function inviaEmailAllievo(isc, pdfBuffer, tempPassword = null) {
   const dest = isc.minore ? isc.genitore_email : isc.email;
-  if (!process.env.SMTP_USER || !dest) return;
+  console.log(`[email] inviaEmailAllievo → dest=${dest} SMTP_USER=${process.env.SMTP_USER || '(non configurato)'}`);
+  if (!process.env.SMTP_USER || !dest) {
+    console.warn('[email] Invio saltato: SMTP_USER o destinatario mancante');
+    return;
+  }
   const transport = createTransport();
   const credenzialiHtml = tempPassword ? `
     <p style="margin-top:16px;padding:12px 16px;background:#f0f4ff;border-left:4px solid #3b5bdb;border-radius:4px;">
@@ -497,6 +501,7 @@ async function inviaEmailAllievo(isc, pdfBuffer, tempPassword = null) {
     `,
     attachments: [{ filename: `conferma_iscrizione_${isc.nome}_${isc.cognome}.pdf`, content: pdfBuffer }],
   });
+  console.log(`[email] Email inviata a ${dest}`);
 }
 
 // ── POST /api/iscrizione — invio modulo (pubblico) ─────────────────────────
@@ -680,7 +685,7 @@ router.patch('/admin/iscrizioni/:id/accetta', authenticateToken, async (req, res
     // Genera PDF con firma presidente e invia all'allievo
     generatePDF(isc, { withPresidente: true })
       .then(pdf => inviaEmailAllievo(isc, pdf, tempPassword))
-      .catch(console.error);
+      .catch(err => console.error('[email] Errore generazione PDF o invio email:', err.message));
 
     res.json({ ok: true, allievoId });
   } catch (err) { console.error(err); res.status(500).json({ error: 'Errore' }); }
