@@ -8,6 +8,8 @@ const { pool } = require('../db');
 const router = express.Router();
 const JWT_SECRET = process.env.JWT_SECRET || 'supersegreto';
 
+pool.query(`ALTER TABLE utenti ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN DEFAULT FALSE`).catch(() => {});
+
 const storage = multer.diskStorage({
   destination: (_req, _file, cb) => cb(null, 'uploads/'),
   filename: (_req, file, cb) => {
@@ -47,8 +49,10 @@ router.post('/login', async (req, res) => {
 
     let allievoId = user.allievo_id || null;
 
+    const mustChangePassword = !!user.must_change_password;
+
     const token = jwt.sign(
-      { userId: user.id, username: user.username, ruolo: user.ruolo, insegnanteId, allievoId },
+      { userId: user.id, username: user.username, ruolo: user.ruolo, insegnanteId, allievoId, mustChangePassword },
       JWT_SECRET
     );
 
@@ -59,9 +63,30 @@ router.post('/login', async (req, res) => {
       username: user.username,
       insegnanteId,
       allievoId,
+      mustChangePassword,
     });
   } catch (err) {
     console.error('Errore login:', err);
+    res.status(500).json({ message: 'Errore server' });
+  }
+});
+
+// POST /api/cambia-password — cambio password obbligatorio al primo accesso
+router.post('/cambia-password', async (req, res) => {
+  const { nuovaPassword } = req.body;
+  const token = req.headers.authorization?.split(' ')[1];
+  if (!token || !nuovaPassword) return res.status(400).json({ message: 'Dati mancanti' });
+  if (nuovaPassword.length < 6) return res.status(400).json({ message: 'Password troppo corta (min 6 caratteri)' });
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET);
+    const hash = await bcrypt.hash(nuovaPassword, 10);
+    await pool.query(
+      `UPDATE utenti SET password=$1, must_change_password=FALSE WHERE id=$2`,
+      [hash, decoded.userId]
+    );
+    res.json({ ok: true });
+  } catch (err) {
+    console.error(err);
     res.status(500).json({ message: 'Errore server' });
   }
 });

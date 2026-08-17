@@ -9,6 +9,7 @@ const path       = require('path');
 const { pool }    = require('../db');
 const { requireRole, authenticateToken } = require('../Middleware/auth');
 const { getAnnoAccademico } = require('../utils/annoAccademico');
+const { genUsernameUnique } = require('../utils/helpers');
 
 const TEMPLATE_DIR = path.join(__dirname, '../assets/templates');
 const NAVY  = rgb(0.118, 0.227, 0.373);
@@ -475,10 +476,11 @@ async function inviaEmailAllievo(isc, pdfBuffer, tempPassword = null) {
   }
   const resend = getResend();
   const from = process.env.EMAIL_FROM || 'AMA Music Academy <noreply@amamusicacademy.it>';
+  const usernameLogin = isc._username || (isc.email || '').toLowerCase().trim();
   const credenzialiHtml = tempPassword ? `
     <p style="margin-top:16px;padding:12px 16px;background:#f0f4ff;border-left:4px solid #3b5bdb;border-radius:4px;">
       <strong>Le tue credenziali di accesso all'app:</strong><br>
-      Username: <code>${isc.email}</code><br>
+      Username: <code>${usernameLogin}</code><br>
       Password temporanea: <code>${tempPassword}</code><br>
       <small>Al primo accesso ti verrà chiesto di cambiarla.</small>
     </p>` : '';
@@ -664,13 +666,14 @@ router.patch('/admin/iscrizioni/:id/accetta', authenticateToken, async (req, res
       // Crea nuovo account (vecchio è stato eliminato alla chiusura anno)
       tempPassword = crypto.randomBytes(5).toString('hex');
       const hash = await bcrypt.hash(tempPassword, 10);
-      const username = (isc.email || `allievo_${allievoId}`).toLowerCase().trim();
+      const username = await genUsernameUnique(isc.nome, isc.cognome, pool, allievoId);
       await pool.query(
-        `INSERT INTO utenti (username, password, ruolo, allievo_id)
-         VALUES ($1,$2,'allievo',$3)
-         ON CONFLICT (username) DO UPDATE SET password=EXCLUDED.password, allievo_id=EXCLUDED.allievo_id`,
+        `INSERT INTO utenti (username, password, ruolo, allievo_id, must_change_password)
+         VALUES ($1,$2,'allievo',$3,TRUE)
+         ON CONFLICT (username) DO UPDATE SET password=EXCLUDED.password, allievo_id=EXCLUDED.allievo_id, must_change_password=TRUE`,
         [username, hash, allievoId]
       );
+      isc._username = username; // usato nell'email
 
       await pool.query('UPDATE iscrizioni SET allievo_id=$1 WHERE id=$2', [allievoId, req.params.id]);
     } catch (e) {

@@ -1,9 +1,36 @@
 const express = require('express');
-const bcrypt = require('bcrypt');
+const bcrypt  = require('bcrypt');
+const crypto  = require('crypto');
+const { Resend } = require('resend');
 const { pool } = require('../db');
 const { requireRole } = require('../Middleware/auth');
-const { genUsernameFrom } = require('../utils/helpers');
+const { genUsernameUnique } = require('../utils/helpers');
 const { getAnnoAccademico } = require('../utils/annoAccademico');
+
+function getResend() { return new Resend(process.env.RESEND_API_KEY); }
+
+async function inviaEmailCredenziali(allievo, username, tempPassword) {
+  if (!process.env.RESEND_API_KEY) return;
+  const dest = allievo.minore ? allievo.genitore_email : allievo.email;
+  if (!dest) return;
+  const resend = getResend();
+  const from = process.env.EMAIL_FROM || 'AMA Music Academy <noreply@amamusicacademy.it>';
+  await resend.emails.send({
+    from,
+    to: dest,
+    subject: 'AMA Music Academy — Credenziali di accesso',
+    html: `
+      <p>Gentile ${allievo.nome} ${allievo.cognome},</p>
+      <p>Di seguito le credenziali per accedere all'app dell'<strong>AMA Music Academy</strong>:</p>
+      <p style="margin:16px 0;padding:12px 16px;background:#f0f4ff;border-left:4px solid #3b5bdb;border-radius:4px;">
+        <strong>Username:</strong> <code>${username}</code><br>
+        <strong>Password temporanea:</strong> <code>${tempPassword}</code><br>
+        <small>Al primo accesso ti verrà chiesto di scegliere una nuova password personale.</small>
+      </p>
+      <p>AMA Music Academy</p>
+    `,
+  });
+}
 
 const router = express.Router();
 
@@ -42,39 +69,72 @@ router.post('/utenti', ...requireRole('admin'), async (req, res) => {
 });
 
 // POST /api/admin/allievi/:id/credenziali
-// Crea (o reimposta) le credenziali di accesso per un allievo esistente
+// Crea (o reimposta) le credenziali — username nome.cognome unico, email all'allievo
 router.post('/admin/allievi/:id/credenziali', ...requireRole('admin'), async (req, res) => {
   const { id } = req.params;
-  const { password } = req.body;
-
   try {
     const allRes = await pool.query('SELECT * FROM allievi WHERE id = $1', [id]);
     if (allRes.rows.length === 0) return res.status(404).json({ error: 'Allievo non trovato' });
     const allievo = allRes.rows[0];
 
-    const username = genUsernameFrom(allievo.nome, allievo.cognome);
-    const pwd = password || 'amamusic';
+    // Controlla se esiste già un utente per questo allievo
+    const esistente = await pool.query('SELECT username FROM utenti WHERE allievo_id=$1', [id]);
+    let username;
+    if (esistente.rows.length > 0) {
+      username = esistente.rows[0].username; // mantieni username esistente
+    } else {
+      username = await genUsernameUnique(allievo.nome, allievo.cognome, pool, parseInt(id));
+    }
+
+    const pwd = crypto.randomBytes(5).toString('hex');
     const hash = await bcrypt.hash(pwd, 10);
 
-    // Upsert utente con ruolo allievo
-    const upsert = await pool.query(
-      `INSERT INTO utenti (username, password, ruolo, allievo_id)
-       VALUES ($1, $2, 'allievo', $3)
-       ON CONFLICT (username)
-       DO UPDATE SET password = EXCLUDED.password, allievo_id = EXCLUDED.allievo_id
-       RETURNING id, username, ruolo, allievo_id`,
+    await pool.query(
+      `INSERT INTO utenti (username, password, ruolo, allievo_id, must_change_password)
+       VALUES ($1,$2,'allievo',$3,TRUE)
+       ON CONFLICT (username) DO UPDATE SET password=EXCLUDED.password, allievo_id=EXCLUDED.allievo_id, must_change_password=TRUE`,
       [username, hash, id]
     );
 
-    res.status(201).json({
-      message: 'Credenziali create',
-      username,
-      password_iniziale: pwd,
-      utente: upsert.rows[0],
-    });
+    // Invia email con le credenziali
+    await inviaEmailCredenziali(allievo, username, pwd).catch(e => console.error('[email]', e.message));
+
+    const dest = allievo.minore ? allievo.genitore_email : allievo.email;
+    res.status(201).json({ message: 'Credenziali create', username, emailInviataA: dest || null });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Errore creazione credenziali allievo' });
+  }
+});
+
+// POST /api/admin/allievi/:id/reset-password
+// Reset password con nuova temp + email
+router.post('/admin/allievi/:id/reset-password', ...requireRole('admin'), async (req, res) => {
+  const { id } = req.params;
+  try {
+    const allRes = await pool.query('SELECT * FROM allievi WHERE id = $1', [id]);
+    if (allRes.rows.length === 0) return res.status(404).json({ error: 'Allievo non trovato' });
+    const allievo = allRes.rows[0];
+
+    const utRes = await pool.query('SELECT username FROM utenti WHERE allievo_id=$1', [id]);
+    if (utRes.rows.length === 0) return res.status(404).json({ error: 'Nessun account trovato per questo allievo' });
+    const username = utRes.rows[0].username;
+
+    const pwd = crypto.randomBytes(5).toString('hex');
+    const hash = await bcrypt.hash(pwd, 10);
+
+    await pool.query(
+      `UPDATE utenti SET password=$1, must_change_password=TRUE WHERE allievo_id=$2`,
+      [hash, id]
+    );
+
+    await inviaEmailCredenziali(allievo, username, pwd).catch(e => console.error('[email]', e.message));
+
+    const dest = allievo.minore ? allievo.genitore_email : allievo.email;
+    res.json({ ok: true, username, emailInviataA: dest || null });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Errore reset password' });
   }
 });
 
