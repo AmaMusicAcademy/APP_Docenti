@@ -104,6 +104,7 @@ function createTransport() {
     host:   process.env.SMTP_HOST   || 'smtp.gmail.com',
     port:   parseInt(process.env.SMTP_PORT || '587'),
     secure: process.env.SMTP_PORT === '465',
+    family: 4, // forza IPv4 (Render non supporta connessioni SMTP su IPv6)
     auth: {
       user: process.env.SMTP_USER,
       pass: process.env.SMTP_PASS,
