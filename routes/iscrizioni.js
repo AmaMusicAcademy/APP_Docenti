@@ -1,7 +1,7 @@
 const express    = require('express');
 const PDFDocument = require('pdfkit');
 const { PDFDocument: PdfLib, rgb, StandardFonts } = require('pdf-lib');
-const nodemailer  = require('nodemailer');
+const { Resend }  = require('resend');
 const crypto      = require('crypto');
 const bcrypt      = require('bcrypt');
 const fs         = require('fs');
@@ -98,18 +98,9 @@ pool.query(`
 pool.query(`ALTER TABLE iscrizioni ADD COLUMN IF NOT EXISTS motivazione_rifiuto TEXT`).catch(() => {});
 pool.query(`ALTER TABLE iscrizioni ADD COLUMN IF NOT EXISTS allievo_id INTEGER`).catch(() => {});
 
-// ── Mailer ─────────────────────────────────────────────────────────────────
-function createTransport() {
-  return nodemailer.createTransport({
-    host:   process.env.SMTP_HOST   || 'smtp.gmail.com',
-    port:   parseInt(process.env.SMTP_PORT || '587'),
-    secure: process.env.SMTP_PORT === '465',
-    family: 4, // forza IPv4 (Render non supporta connessioni SMTP su IPv6)
-    auth: {
-      user: process.env.SMTP_USER,
-      pass: process.env.SMTP_PASS,
-    },
-  });
+// ── Mailer (Resend HTTP API — no SMTP) ─────────────────────────────────────
+function getResend() {
+  return new Resend(process.env.RESEND_API_KEY);
 }
 
 // ── Helpers PDF ────────────────────────────────────────────────────────────
@@ -455,12 +446,13 @@ async function generatePDF(isc, { withPresidente = false } = {}) {
   return Buffer.from(await merged.save());
 }
 
-// ── Invio email ─────────────────────────────────────────────────────────────
+// ── Invio email (Resend HTTP API) ───────────────────────────────────────────
 async function inviaEmailDirezione(isc, pdfBuffer) {
-  if (!process.env.SMTP_USER) return; // SMTP non configurato
-  const transport = createTransport();
-  await transport.sendMail({
-    from:    `"AMA Music Academy" <${process.env.SMTP_USER}>`,
+  if (!process.env.RESEND_API_KEY) return;
+  const resend = getResend();
+  const from = process.env.EMAIL_FROM || 'AMA Music Academy <noreply@amamusicacademy.it>';
+  await resend.emails.send({
+    from,
     to:      process.env.SEGRETERIA_EMAIL || 'segreteria@amamusicacademy.it',
     subject: `Nuova domanda di iscrizione — ${isc.nome} ${isc.cognome}`,
     html: `
@@ -469,18 +461,20 @@ async function inviaEmailDirezione(isc, pdfBuffer) {
       <p>Email: ${isc.email} — Telefono: ${isc.telefono}</p>
       <p>In allegato il modulo completo. Accedi all'app amministratore per accettare o rifiutare la domanda.</p>
     `,
-    attachments: [{ filename: `iscrizione_${isc.nome}_${isc.cognome}.pdf`, content: pdfBuffer }],
+    attachments: [{ filename: `iscrizione_${isc.nome}_${isc.cognome}.pdf`, content: pdfBuffer.toString('base64') }],
   });
+  console.log('[email] Email direzione inviata');
 }
 
 async function inviaEmailAllievo(isc, pdfBuffer, tempPassword = null) {
   const dest = isc.minore ? isc.genitore_email : isc.email;
-  console.log(`[email] inviaEmailAllievo → dest=${dest} SMTP_USER=${process.env.SMTP_USER || '(non configurato)'}`);
-  if (!process.env.SMTP_USER || !dest) {
-    console.warn('[email] Invio saltato: SMTP_USER o destinatario mancante');
+  console.log(`[email] inviaEmailAllievo → dest=${dest} RESEND_API_KEY=${process.env.RESEND_API_KEY ? 'configurata' : '(non configurata)'}`);
+  if (!process.env.RESEND_API_KEY || !dest) {
+    console.warn('[email] Invio saltato: RESEND_API_KEY o destinatario mancante');
     return;
   }
-  const transport = createTransport();
+  const resend = getResend();
+  const from = process.env.EMAIL_FROM || 'AMA Music Academy <noreply@amamusicacademy.it>';
   const credenzialiHtml = tempPassword ? `
     <p style="margin-top:16px;padding:12px 16px;background:#f0f4ff;border-left:4px solid #3b5bdb;border-radius:4px;">
       <strong>Le tue credenziali di accesso all'app:</strong><br>
@@ -488,8 +482,8 @@ async function inviaEmailAllievo(isc, pdfBuffer, tempPassword = null) {
       Password temporanea: <code>${tempPassword}</code><br>
       <small>Al primo accesso ti verrà chiesto di cambiarla.</small>
     </p>` : '';
-  await transport.sendMail({
-    from:    `"AMA Music Academy" <${process.env.SMTP_USER}>`,
+  await resend.emails.send({
+    from,
     to:      dest,
     subject: 'Iscrizione AMA Music Academy — Conferma di accettazione',
     html: `
@@ -500,7 +494,7 @@ async function inviaEmailAllievo(isc, pdfBuffer, tempPassword = null) {
       <p>Benvenuto/a nella nostra accademia!</p>
       <br><p>AMA Music Academy</p>
     `,
-    attachments: [{ filename: `conferma_iscrizione_${isc.nome}_${isc.cognome}.pdf`, content: pdfBuffer }],
+    attachments: [{ filename: `conferma_iscrizione_${isc.nome}_${isc.cognome}.pdf`, content: pdfBuffer.toString('base64') }],
   });
   console.log(`[email] Email inviata a ${dest}`);
 }
