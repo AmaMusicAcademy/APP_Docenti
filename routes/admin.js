@@ -25,7 +25,8 @@ async function inviaEmailCredenziali(allievo, username, tempPassword) {
       <p style="margin:16px 0;padding:12px 16px;background:#f0f4ff;border-left:4px solid #3b5bdb;border-radius:4px;">
         <strong>Username:</strong> <code>${username}</code><br>
         <strong>Password temporanea:</strong> <code>${tempPassword}</code><br>
-        <small>Al primo accesso ti verrà chiesto di scegliere una nuova password personale.</small>
+        <small>Al primo accesso ti verrà chiesto di scegliere una nuova password personale.</small><br><br>
+        <a href="https://amamusicacademy.it/guida-webapp/" style="color:#3b5bdb;">Guida all'accesso e utilizzo dell'app →</a>
       </p>
       <p>AMA Music Academy</p>
     `,

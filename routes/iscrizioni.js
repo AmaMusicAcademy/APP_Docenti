@@ -482,7 +482,8 @@ async function inviaEmailAllievo(isc, pdfBuffer, tempPassword = null) {
       <strong>Le tue credenziali di accesso all'app:</strong><br>
       Username: <code>${usernameLogin}</code><br>
       Password temporanea: <code>${tempPassword}</code><br>
-      <small>Al primo accesso ti verrà chiesto di cambiarla.</small>
+      <small>Al primo accesso ti verrà chiesto di cambiarla.</small><br><br>
+      <a href="https://amamusicacademy.it/guida-webapp/" style="color:#3b5bdb;">Guida all'accesso e utilizzo dell'app →</a>
     </p>` : '';
   await resend.emails.send({
     from,
