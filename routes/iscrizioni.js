@@ -27,7 +27,7 @@ const PREZZI_MATERIE = {
   'Violino 45min': 80, 'Violino 1h': 100,
   'Chitarra 45min': 80, 'Chitarra 1h': 100,
   'Batteria 45min': 80, 'Batteria 1h': 100,
-  'Coro': 40, 'Band': 30, 'Trinity': 10,
+  'Coro': 40, 'Coro Teen': 30, 'Band': 30, 'Trinity': 10,
 };
 
 function calcolaQuotaMensile(strumentoCSV) {
