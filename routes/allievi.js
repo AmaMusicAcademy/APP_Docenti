@@ -51,7 +51,7 @@ router.get('/allievi', authenticateToken, async (req, res) => {
     return res.status(403).json({ message: 'Accesso negato' });
   }
   try {
-    const { rows } = await pool.query('SELECT * FROM allievi ORDER BY cognome, nome');
+    const { rows } = await pool.query('SELECT * FROM allievi WHERE attivo IS DISTINCT FROM FALSE ORDER BY cognome, nome');
     res.json(rows);
   } catch (err) {
     console.error(err);
