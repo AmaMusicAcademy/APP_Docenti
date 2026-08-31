@@ -54,11 +54,18 @@ function switchbotRequest(path, method = 'GET', body = null) {
 // position: 0 (chiusa) … 100 (aperta)
 async function setValvePosition(deviceId, position) {
   const pos = Math.round(Math.min(100, Math.max(0, position)));
-  return switchbotRequest(
+  const result = await switchbotRequest(
     `/v1.1/devices/${deviceId}/commands`,
     'POST',
     { commandType: 'command', command: 'setPosition', parameter: `0,ff,${pos}` }
   );
+  const statusCode = result?.statusCode ?? result?.status ?? '?';
+  if (statusCode !== 100 && statusCode !== 200) {
+    console.error(`[clima] setValvePosition deviceId=${deviceId} pos=${pos} → SwitchBot errore:`, JSON.stringify(result));
+  } else {
+    console.log(`[clima] setValvePosition deviceId=${deviceId} pos=${pos} → OK (${statusCode})`);
+  }
+  return result;
 }
 
 // ── Logica proporzionale: temperatura → posizione valvola ─────────────────
@@ -182,13 +189,13 @@ router.post('/clima/valvola/:deviceId/posizione', authenticateToken, requireSwit
   }
   const pos = parseInt(req.body.posizione ?? 0, 10);
   try {
-    await setValvePosition(req.params.deviceId, pos);
+    const sbRes = await setValvePosition(req.params.deviceId, pos);
     // Aggiorna posizione_attuale nel DB se esiste un target per questo device
     await pool.query(
       `UPDATE clima_target SET posizione_attuale = $1 WHERE device_id_valvola = $2`,
       [pos, req.params.deviceId]
     );
-    res.json({ ok: true, posizione: pos });
+    res.json({ ok: true, posizione: pos, switchbot: sbRes });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Errore impostazione posizione valvola' });
