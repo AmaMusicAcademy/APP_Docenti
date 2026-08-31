@@ -50,34 +50,32 @@ function switchbotRequest(path, method = 'GET', body = null) {
   });
 }
 
-// ── Posizione valvola (Relay Switch 2PM in modalità tapparella) ───────────
-// position: 0 (chiusa) … 100 (aperta)
+// ── Controllo valvola (Relay Switch 2PM) ─────────────────────────────────
+// position: 0 = chiusa (turnOff), 1-100 = aperta (turnOn)
 async function setValvePosition(deviceId, position) {
   const pos = Math.round(Math.min(100, Math.max(0, position)));
+  const command = pos > 0 ? 'turnOn' : 'turnOff';
   const result = await switchbotRequest(
     `/v1.1/devices/${deviceId}/commands`,
     'POST',
-    { commandType: 'command', command: 'setPosition', parameter: `0,ff,${pos}` }
+    { commandType: 'command', command, parameter: 'default' }
   );
   const statusCode = result?.statusCode ?? result?.status ?? '?';
   if (statusCode !== 100 && statusCode !== 200) {
-    console.error(`[clima] setValvePosition deviceId=${deviceId} pos=${pos} → SwitchBot errore:`, JSON.stringify(result));
+    console.error(`[clima] valvola deviceId=${deviceId} comando=${command} → errore:`, JSON.stringify(result));
   } else {
-    console.log(`[clima] setValvePosition deviceId=${deviceId} pos=${pos} → OK (${statusCode})`);
+    console.log(`[clima] valvola deviceId=${deviceId} comando=${command} → OK (${statusCode})`);
   }
   return result;
 }
 
-// ── Logica proporzionale: temperatura → posizione valvola ─────────────────
-// Isteresi ±0.3°C per evitare oscillazioni continue
+// ── Logica on/off con isteresi: temperatura → 0 (chiusa) o 100 (aperta) ──
+// Isteresi ±0.3°C per evitare cicli rapidi
 function calcolaPosizioneValvola(tempAttuale, tempTarget, posizioneAttuale) {
   const errore = tempTarget - tempAttuale;
-
-  if (errore > 2.0)  return 100;               // freddo: apri completamente
-  if (errore > 0.3)  return Math.round(Math.min(100, 40 + (errore / 2.0) * 60)); // proporzionale 40-100%
-  if (errore >= -0.3) return posizioneAttuale; // nella finestra target: mantieni
-  if (errore > -1.5) return Math.round(Math.max(0, 40 + (errore / 1.5) * 40));  // caldo: riduci
-  return 0;                                    // troppo caldo: chiudi
+  if (errore > 0.3)  return 100; // freddo → apri
+  if (errore < -0.3) return 0;   // caldo → chiudi
+  return posizioneAttuale;        // dentro la finestra → mantieni stato
 }
 
 // ── Setup tabella clima_target ────────────────────────────────────────────
