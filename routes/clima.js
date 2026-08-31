@@ -274,6 +274,18 @@ async function avviaControlloClima() {
     `SELECT * FROM clima_target WHERE attivo = TRUE AND device_id_valvola IS NOT NULL`
   );
 
+  // Log device types per diagnostica
+  try {
+    const devRes = await switchbotRequest('/v1.1/devices');
+    const deviceList = devRes?.body?.deviceList ?? [];
+    for (const t of targets) {
+      const found = deviceList.find(d => d.deviceId === t.device_id_valvola);
+      console.log(`[clima] valvola "${t.aula_nome}" deviceId=${t.device_id_valvola} → deviceType=${found?.deviceType ?? 'NON TROVATO'} hub=${found?.hubDeviceId ?? '-'}`);
+    }
+  } catch (e) {
+    console.error('[clima] errore lettura device list:', e.message);
+  }
+
   for (const t of targets) {
     try {
       let tempAttuale = null;
