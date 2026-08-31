@@ -50,32 +50,35 @@ function switchbotRequest(path, method = 'GET', body = null) {
   });
 }
 
-// ── Controllo valvola (Relay Switch 2PM) ─────────────────────────────────
-// position: 0 = chiusa (turnOff), 1-100 = aperta (turnOn)
+// ── Controllo valvola (Relay Switch 2PM in modalità tapparella) ───────────
+// position (nostro): 0 = chiusa, 100 = aperta
+// SwitchBot convention: 0 = aperta, 100 = chiusa  → invertiamo
 async function setValvePosition(deviceId, position) {
   const pos = Math.round(Math.min(100, Math.max(0, position)));
-  const command = pos > 0 ? 'turnOn' : 'turnOff';
+  const sbPos = 100 - pos; // inversione: nostro 100 (aperta) → SwitchBot 0
   const result = await switchbotRequest(
     `/v1.1/devices/${deviceId}/commands`,
     'POST',
-    { commandType: 'command', command, parameter: 'default' }
+    { commandType: 'command', command: 'setPosition', parameter: String(sbPos) }
   );
   const statusCode = result?.statusCode ?? result?.status ?? '?';
   if (statusCode !== 100 && statusCode !== 200) {
-    console.error(`[clima] valvola deviceId=${deviceId} comando=${command} → errore:`, JSON.stringify(result));
+    console.error(`[clima] valvola deviceId=${deviceId} setPosition=${sbPos} → errore:`, JSON.stringify(result));
   } else {
-    console.log(`[clima] valvola deviceId=${deviceId} comando=${command} → OK (${statusCode})`);
+    console.log(`[clima] valvola deviceId=${deviceId} setPosition=${sbPos} (nostro ${pos}%) → OK (${statusCode})`);
   }
   return result;
 }
 
-// ── Logica on/off con isteresi: temperatura → 0 (chiusa) o 100 (aperta) ──
-// Isteresi ±0.3°C per evitare cicli rapidi
+// ── Logica proporzionale: temperatura → posizione valvola (0=chiusa, 100=aperta)
+// Isteresi ±0.3°C per evitare oscillazioni continue
 function calcolaPosizioneValvola(tempAttuale, tempTarget, posizioneAttuale) {
   const errore = tempTarget - tempAttuale;
-  if (errore > 0.3)  return 100; // freddo → apri
-  if (errore < -0.3) return 0;   // caldo → chiudi
-  return posizioneAttuale;        // dentro la finestra → mantieni stato
+  if (errore > 2.0)  return 100;
+  if (errore > 0.3)  return Math.round(Math.min(100, 40 + (errore / 2.0) * 60));
+  if (errore >= -0.3) return posizioneAttuale; // finestra target: mantieni
+  if (errore > -1.5) return Math.round(Math.max(0, 40 + (errore / 1.5) * 40));
+  return 0;
 }
 
 // ── Setup tabella clima_target ────────────────────────────────────────────
