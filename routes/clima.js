@@ -103,23 +103,30 @@ function requireSwitchbot(req, res, next) {
 }
 
 // ── Middleware restrizione insegnanti ─────────────────────────────────────
+// Restituisce null se non autorizzato, altrimenti array delle aule attive
 async function checkInsegnante(req) {
-  if (req.user.ruolo !== 'insegnante') return true;
+  if (req.user.ruolo !== 'insegnante') return null; // null = admin/altro, nessun filtro aula
   const { rows } = await pool.query(`
-    SELECT l.id FROM lezioni l
+    SELECT DISTINCT l.aula FROM lezioni l
     WHERE l.id_insegnante = $1
       AND l.data = (NOW() AT TIME ZONE 'Europe/Rome')::date
       AND l.ora_inizio <= (NOW() AT TIME ZONE 'Europe/Rome')::time + interval '30 minutes'
       AND l.ora_fine   >= (NOW() AT TIME ZONE 'Europe/Rome')::time - interval '30 minutes'
       AND l.stato NOT IN ('annullata')
-    LIMIT 1
+      AND l.aula IS NOT NULL
   `, [req.user.insegnanteId]);
-  return rows.length > 0;
+  if (rows.length === 0) return false; // false = insegnante senza lezione attiva
+  return rows.map(r => r.aula);        // array di aule autorizzate
 }
 
 // ── GET /api/clima/dispositivi ────────────────────────────────────────────
 router.get('/clima/dispositivi', authenticateToken, requireSwitchbot, async (req, res) => {
   try {
+    const auleAutorizzate = await checkInsegnante(req);
+    if (auleAutorizzate === false) {
+      return res.status(403).json({ error: 'Controllo disponibile solo durante le ore di lezione' });
+    }
+
     const [sbRes, auleRes, targetsRes] = await Promise.all([
       switchbotRequest('/v1.1/devices'),
       pool.query('SELECT id, nome FROM aule ORDER BY nome'),
@@ -130,12 +137,20 @@ router.get('/clima/dispositivi', authenticateToken, requireSwitchbot, async (req
     const infra   = sbRes?.body?.infraredRemoteList ?? [];
     const tutti   = [...devices, ...infra];
     const aule    = auleRes.rows;
-    const targets = targetsRes.rows;
+    let targets   = targetsRes.rows;
+
+    // Filtra aule se insegnante
+    if (Array.isArray(auleAutorizzate)) {
+      targets = targets.filter(t => auleAutorizzate.includes(t.aula_nome));
+    }
 
     const enriched = tutti.map(d => {
       const nomeDevice = (d.deviceName || '').toLowerCase();
       const aula = aule.find(a => nomeDevice.includes(a.nome.toLowerCase()));
       return { ...d, aula_id: aula?.id ?? null, aula_nome: aula?.nome ?? null };
+    }).filter(d => {
+      if (!Array.isArray(auleAutorizzate)) return true;
+      return auleAutorizzate.includes(d.aula_nome);
     });
 
     res.json({ ok: true, dispositivi: enriched, aule, targets });
@@ -147,7 +162,8 @@ router.get('/clima/dispositivi', authenticateToken, requireSwitchbot, async (req
 
 // ── GET /api/clima/stato/:deviceId ────────────────────────────────────────
 router.get('/clima/stato/:deviceId', authenticateToken, requireSwitchbot, async (req, res) => {
-  if (!(await checkInsegnante(req))) {
+  const auleAutorizzate = await checkInsegnante(req);
+  if (auleAutorizzate === false) {
     return res.status(403).json({ error: 'Controllo disponibile solo durante le ore di lezione' });
   }
   try {
@@ -185,8 +201,18 @@ router.post('/clima/comando/:deviceId', authenticateToken, requireSwitchbot, asy
 // ── POST /api/clima/valvola/:deviceId/posizione ───────────────────────────
 // body: { posizione: 0-100 }  — imposta direttamente la percentuale di apertura
 router.post('/clima/valvola/:deviceId/posizione', authenticateToken, requireSwitchbot, async (req, res) => {
-  if (!(await checkInsegnante(req))) {
+  const auleAutorizzate = await checkInsegnante(req);
+  if (auleAutorizzate === false) {
     return res.status(403).json({ error: 'Controllo disponibile solo durante le ore di lezione' });
+  }
+  if (Array.isArray(auleAutorizzate)) {
+    const { rows } = await pool.query(
+      `SELECT aula_nome FROM clima_target WHERE device_id_valvola = $1`,
+      [req.params.deviceId]
+    );
+    if (!rows.length || !auleAutorizzate.includes(rows[0].aula_nome)) {
+      return res.status(403).json({ error: 'Dispositivo non associato alla tua aula' });
+    }
   }
   const pos = parseInt(req.body.posizione ?? 0, 10);
   try {
@@ -206,8 +232,18 @@ router.post('/clima/valvola/:deviceId/posizione', authenticateToken, requireSwit
 // ── POST /api/clima/valvola/:deviceId/spegni ─────────────────────────────
 // Chiude completamente la valvola (0%) e disattiva il controllo automatico
 router.post('/clima/valvola/:deviceId/spegni', authenticateToken, requireSwitchbot, async (req, res) => {
-  if (!(await checkInsegnante(req))) {
+  const auleAutorizzate = await checkInsegnante(req);
+  if (auleAutorizzate === false) {
     return res.status(403).json({ error: 'Controllo disponibile solo durante le ore di lezione' });
+  }
+  if (Array.isArray(auleAutorizzate)) {
+    const { rows } = await pool.query(
+      `SELECT aula_nome FROM clima_target WHERE device_id_valvola = $1`,
+      [req.params.deviceId]
+    );
+    if (!rows.length || !auleAutorizzate.includes(rows[0].aula_nome)) {
+      return res.status(403).json({ error: 'Dispositivo non associato alla tua aula' });
+    }
   }
   try {
     await setValvePosition(req.params.deviceId, 0);
@@ -223,9 +259,19 @@ router.post('/clima/valvola/:deviceId/spegni', authenticateToken, requireSwitchb
 });
 
 // ── GET /api/clima/targets ────────────────────────────────────────────────
-router.get('/clima/targets', authenticateToken, async (_req, res) => {
+router.get('/clima/targets', authenticateToken, async (req, res) => {
   try {
-    const { rows } = await pool.query('SELECT * FROM clima_target ORDER BY aula_nome');
+    const auleAutorizzate = await checkInsegnante(req);
+    if (auleAutorizzate === false) {
+      return res.status(403).json({ error: 'Controllo disponibile solo durante le ore di lezione' });
+    }
+    let query = 'SELECT * FROM clima_target ORDER BY aula_nome';
+    let params = [];
+    if (Array.isArray(auleAutorizzate)) {
+      query = 'SELECT * FROM clima_target WHERE aula_nome = ANY($1) ORDER BY aula_nome';
+      params = [auleAutorizzate];
+    }
+    const { rows } = await pool.query(query, params);
     res.json(rows);
   } catch (err) {
     res.status(500).json({ error: 'Errore lettura targets' });
@@ -235,11 +281,16 @@ router.get('/clima/targets', authenticateToken, async (_req, res) => {
 // ── POST /api/clima/target ────────────────────────────────────────────────
 // body: { aula_nome, device_id_termometro, device_id_valvola, temperatura_target, attivo }
 router.post('/clima/target', authenticateToken, requireSwitchbot, async (req, res) => {
-  if (!(await checkInsegnante(req))) {
+  const auleAutorizzate = await checkInsegnante(req);
+  if (auleAutorizzate === false) {
     return res.status(403).json({ error: 'Controllo disponibile solo durante le ore di lezione' });
   }
 
   const { aula_nome, device_id_termometro, device_id_valvola, temperatura_target, attivo = true } = req.body;
+
+  if (Array.isArray(auleAutorizzate) && !auleAutorizzate.includes(aula_nome)) {
+    return res.status(403).json({ error: 'Puoi modificare solo la temperatura della tua aula' });
+  }
   if (!aula_nome || !device_id_valvola || !temperatura_target) {
     return res.status(400).json({ error: 'Campi obbligatori: aula_nome, device_id_valvola, temperatura_target' });
   }
