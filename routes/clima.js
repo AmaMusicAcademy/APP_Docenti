@@ -72,11 +72,16 @@ async function setValvePosition(deviceId, position) {
 
 // ── Logica proporzionale: temperatura → posizione valvola (0=chiusa, 100=aperta)
 // Isteresi ±0.3°C per evitare oscillazioni continue
-function calcolaPosizioneValvola(tempAttuale, tempTarget, posizioneAttuale) {
-  const errore = tempTarget - tempAttuale;
+// In riscaldamento: apri quando fa freddo; in raffrescamento: apri quando fa caldo
+function calcolaPosizioneValvola(tempAttuale, tempTarget, posizioneAttuale, modalita = 'riscaldamento') {
+  // In raffrescamento l'errore è invertito: vogliamo aprire quando fa caldo (temp > target)
+  const errore = modalita === 'raffrescamento'
+    ? tempAttuale - tempTarget
+    : tempTarget - tempAttuale;
+
   if (errore > 2.0)  return 100;
   if (errore > 0.3)  return Math.round(Math.min(100, 40 + (errore / 2.0) * 60));
-  if (errore >= -0.3) return posizioneAttuale; // finestra target: mantieni
+  if (errore >= -0.3) return posizioneAttuale;
   if (errore > -1.5) return Math.round(Math.max(0, 40 + (errore / 1.5) * 40));
   return 0;
 }
@@ -90,9 +95,12 @@ pool.query(`
     temperatura_target   NUMERIC(4,1),
     posizione_attuale    INTEGER DEFAULT 0,
     attivo               BOOLEAN DEFAULT FALSE,
+    modalita             TEXT DEFAULT 'riscaldamento',
     updated_at           TIMESTAMPTZ DEFAULT NOW()
   )
 `).catch(() => {});
+// Migrazione: aggiunge colonna se non esiste su DB già creati
+pool.query(`ALTER TABLE clima_target ADD COLUMN IF NOT EXISTS modalita TEXT DEFAULT 'riscaldamento'`).catch(() => {});
 
 // ── Middleware credenziali ────────────────────────────────────────────────
 function requireSwitchbot(req, res, next) {
@@ -286,10 +294,14 @@ router.post('/clima/target', authenticateToken, requireSwitchbot, async (req, re
     return res.status(403).json({ error: 'Controllo disponibile solo durante le ore di lezione' });
   }
 
-  const { aula_nome, device_id_termometro, device_id_valvola, temperatura_target, attivo = true } = req.body;
+  const { aula_nome, device_id_termometro, device_id_valvola, temperatura_target, attivo = true, modalita } = req.body;
 
   if (Array.isArray(auleAutorizzate) && !auleAutorizzate.includes(aula_nome)) {
     return res.status(403).json({ error: 'Puoi modificare solo la temperatura della tua aula' });
+  }
+  // Solo admin può cambiare modalità
+  if (modalita && Array.isArray(auleAutorizzate)) {
+    return res.status(403).json({ error: 'Solo l\'amministratore può cambiare la modalità impianto' });
   }
   if (!aula_nome || !device_id_valvola || !temperatura_target) {
     return res.status(400).json({ error: 'Campi obbligatori: aula_nome, device_id_valvola, temperatura_target' });
@@ -297,16 +309,17 @@ router.post('/clima/target', authenticateToken, requireSwitchbot, async (req, re
 
   try {
     const { rows } = await pool.query(`
-      INSERT INTO clima_target (aula_nome, device_id_termometro, device_id_valvola, temperatura_target, attivo, updated_at)
-      VALUES ($1, $2, $3, $4, $5, NOW())
+      INSERT INTO clima_target (aula_nome, device_id_termometro, device_id_valvola, temperatura_target, attivo, modalita, updated_at)
+      VALUES ($1, $2, $3, $4, $5, $6, NOW())
       ON CONFLICT (aula_nome) DO UPDATE SET
         device_id_termometro = EXCLUDED.device_id_termometro,
         device_id_valvola    = EXCLUDED.device_id_valvola,
         temperatura_target   = EXCLUDED.temperatura_target,
         attivo               = EXCLUDED.attivo,
+        modalita             = COALESCE(EXCLUDED.modalita, clima_target.modalita),
         updated_at           = NOW()
       RETURNING *
-    `, [aula_nome, device_id_termometro || null, device_id_valvola, temperatura_target, attivo]);
+    `, [aula_nome, device_id_termometro || null, device_id_valvola, temperatura_target, attivo, modalita || 'riscaldamento']);
 
     // Se attivato, avvia subito un ciclo di controllo
     if (attivo) avviaControlloClima().catch(console.error);
@@ -354,7 +367,8 @@ async function avviaControlloClima() {
       const nuovaPosizione = calcolaPosizioneValvola(
         tempAttuale,
         parseFloat(t.temperatura_target),
-        t.posizione_attuale ?? 50
+        t.posizione_attuale ?? 50,
+        t.modalita ?? 'riscaldamento'
       );
 
       // Invia comando solo se la posizione cambia di almeno 5 punti (evita rumore)
