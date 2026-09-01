@@ -202,7 +202,7 @@ router.post('/lezioni', authenticateToken, async (req, res) => {
 
     const isCollettiva = Boolean(gruppo_id);
 
-    if (!id_insegnante || !data || !ora_inizio || !ora_fine || !aula) {
+    if (!id_insegnante || !data || !ora_inizio || !ora_fine) {
       return res.status(400).json({ error: 'Dati incompleti per creare la lezione' });
     }
     if (!isCollettiva && !id_allievo) {
@@ -213,17 +213,19 @@ router.post('/lezioni', authenticateToken, async (req, res) => {
       return res.status(403).json({ error: 'Accesso non autorizzato' });
     }
 
-    // Conflict detection aula
-    const conflict = await pool.query(
-      `SELECT 1 FROM lezioni
-       WHERE data = $1 AND aula = $2
-         AND ($3 < ora_fine AND $4 > ora_inizio)
-         AND stato NOT IN ('annullata')
-       LIMIT 1`,
-      [data, aula, ora_inizio, ora_fine]
-    );
-    if (conflict.rows.length > 0) {
-      return res.status(409).json({ error: "L'aula è già occupata in questo orario." });
+    // Conflict detection aula (solo se aula specificata)
+    if (aula) {
+      const conflict = await pool.query(
+        `SELECT 1 FROM lezioni
+         WHERE data = $1 AND aula = $2
+           AND ($3 < ora_fine AND $4 > ora_inizio)
+           AND stato NOT IN ('annullata')
+         LIMIT 1`,
+        [data, aula, ora_inizio, ora_fine]
+      );
+      if (conflict.rows.length > 0) {
+        return res.status(409).json({ error: "L'aula è già occupata in questo orario." });
+      }
     }
 
     let nomeGruppo = null;
