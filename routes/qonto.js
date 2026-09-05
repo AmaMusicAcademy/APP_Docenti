@@ -315,12 +315,24 @@ router.post('/qonto/abbina', ...requireRole('admin'), async (req, res) => {
 
     if (tipo_pagamento === 'mensile') {
       await registraMesi(allievo_id, mesi, tx[0].data);
-    } else {
+    } else if (tipo_pagamento === 'associativa') {
       const anno = mesi[0].anno;
       await pool.query(`
         INSERT INTO quote_associative (allievo_id,anno,pagata,data_pagamento)
         VALUES ($1,$2,TRUE,$3) ON CONFLICT (allievo_id,anno) DO UPDATE SET pagata=TRUE,data_pagamento=$3
       `, [allievo_id, anno, tx[0].data]);
+    } else if (tipo_pagamento === 'mensile+associativa') {
+      // Registra i mesi mensili
+      const mesiMensili = mesi.filter(m => m.mese != null);
+      if (mesiMensili.length) await registraMesi(allievo_id, mesiMensili, tx[0].data);
+      // Registra la tassa associativa
+      const annoAssoc = mesi.find(m => m.mese == null)?.anno || mesiMensili[0]?.anno;
+      if (annoAssoc) {
+        await pool.query(`
+          INSERT INTO quote_associative (allievo_id,anno,pagata,data_pagamento)
+          VALUES ($1,$2,TRUE,$3) ON CONFLICT (allievo_id,anno) DO UPDATE SET pagata=TRUE,data_pagamento=$3
+        `, [allievo_id, annoAssoc, tx[0].data]);
+      }
     }
 
     // Salva il mittente come noto per il futuro
@@ -351,12 +363,21 @@ router.delete('/qonto/abbina/:txId', ...requireRole('admin'), async (req, res) =
     if (tx.allievo_id && tx.mesi_registrati) {
       if (tx.tipo_pagamento === 'mensile') {
         await rollbackMesi(tx.mesi_registrati, tx.allievo_id);
-      } else {
-        // rollback quota associativa: solo se pagata tramite questa transazione
+      } else if (tx.tipo_pagamento === 'associativa') {
         for (const { anno } of tx.mesi_registrati) {
           await pool.query(
             `UPDATE quote_associative SET pagata=FALSE, data_pagamento=NULL WHERE allievo_id=$1 AND anno=$2`,
             [tx.allievo_id, anno]
+          );
+        }
+      } else if (tx.tipo_pagamento === 'mensile+associativa') {
+        const mesiMensili = tx.mesi_registrati.filter(m => m.mese != null);
+        if (mesiMensili.length) await rollbackMesi(mesiMensili, tx.allievo_id);
+        const annoAssoc = tx.mesi_registrati.find(m => m.mese == null)?.anno || mesiMensili[0]?.anno;
+        if (annoAssoc) {
+          await pool.query(
+            `UPDATE quote_associative SET pagata=FALSE, data_pagamento=NULL WHERE allievo_id=$1 AND anno=$2`,
+            [tx.allievo_id, annoAssoc]
           );
         }
       }
