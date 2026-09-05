@@ -47,6 +47,8 @@ app.use('/api', require('./routes/gruppi'));
 app.use('/api', require('./routes/anno-accademico'));
 const { router: climaRouter, avviaControlloClima } = require('./routes/clima');
 app.use('/api', climaRouter);
+const { router: acRouter, controllaAC } = require('./routes/ac');
+app.use('/api', acRouter);
 
 // ----------------------
 // Health + debug routes
@@ -110,5 +112,8 @@ avviaMigrazioni().then(() => {
     // Controllo clima ogni 5 minuti
     schedule.scheduleJob('*/5 * * * *', () => avviaControlloClima().catch(console.error));
     console.log('Cron controllo clima avviato (ogni 5 minuti)');
+    // Controllo AC ogni minuto
+    schedule.scheduleJob('* * * * *', () => controllaAC().catch(console.error));
+    console.log('Cron controllo AC avviato (ogni minuto)');
   });
 });
