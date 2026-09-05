@@ -159,7 +159,10 @@ async function eseguiAccensione(dispositivi, oggi, motivo) {
     await delay(1500); // pausa tra comandi
   }
   await pool.query(
-    `UPDATE ac_stato SET acceso = true, ultima_azione = 'accensione', aggiornato_il = NOW() WHERE data = $1`,
+    `INSERT INTO ac_stato (data, acceso, ultima_azione, aggiornato_il)
+     VALUES ($1, true, 'accensione', NOW())
+     ON CONFLICT (data) DO UPDATE
+       SET acceso = true, ultima_azione = 'accensione', aggiornato_il = NOW()`,
     [oggi]
   );
 }
@@ -177,7 +180,10 @@ async function eseguiSpegnimento(dispositivi, oggi, motivo) {
     await delay(1500);
   }
   await pool.query(
-    `UPDATE ac_stato SET acceso = false, ultima_azione = 'spegnimento', aggiornato_il = NOW() WHERE data = $1`,
+    `INSERT INTO ac_stato (data, acceso, ultima_azione, aggiornato_il)
+     VALUES ($1, false, 'spegnimento', NOW())
+     ON CONFLICT (data) DO UPDATE
+       SET acceso = false, ultima_azione = 'spegnimento', aggiornato_il = NOW()`,
     [oggi]
   );
 }
