@@ -354,15 +354,17 @@ router.get('/allievo/pagamenti-arretrati', ...requireRole('allievo'), async (req
     const now = new Date();
     const nowM = now.getUTCMonth() + 1;
     const nowY = now.getUTCFullYear();
-    // Settembre dell'anno accademico corrente
-    const annoAccInizio = nowM >= 9 ? nowY : nowY - 1;
-    const settembreAA = new Date(Date.UTC(annoAccInizio, 8, 1)); // mese 8 = settembre
-    // I pagamenti partono dal massimo tra settembre AA e data_iscrizione
-    const dataIsc = data_iscrizione ? new Date(`${String(data_iscrizione).slice(0,10)}T00:00:00Z`) : settembreAA;
-    const start = dataIsc > settembreAA ? dataIsc : settembreAA;
+    // Settembre del primo anno accademico in cui l'allievo si è iscritto
+    const dataIsc = data_iscrizione ? new Date(`${String(data_iscrizione).slice(0,10)}T00:00:00Z`) : now;
+    const iscM = dataIsc.getUTCMonth() + 1;
+    const iscY = dataIsc.getUTCFullYear();
+    const annoAccIsc = iscM >= 9 ? iscY : iscY - 1;
+    const settembreIsc = new Date(Date.UTC(annoAccIsc, 8, 1)); // settembre anno iscrizione
+    // Partenza: settembre dell'anno accademico di iscrizione (o data iscrizione se successiva)
+    const start = dataIsc > settembreIsc ? dataIsc : settembreIsc;
     const arretrati = [];
     let cur = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), 1));
-    // fino al mese corrente incluso (il saldo va fatto entro la prima lezione del mese)
+    // fino al mese corrente incluso
     const limiteMese = new Date(Date.UTC(nowY, nowM, 1));
 
     while (cur < limiteMese) {
