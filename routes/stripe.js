@@ -233,36 +233,68 @@ router.get('/stripe/pagamenti-admin', async (req, res) => {
   } catch { return res.status(401).json({ error: 'Token non valido' }); }
 
   try {
-    // Recupera ultimi 100 PaymentIntent con status succeeded
-    const list = await stripe.paymentIntents.list({ limit: 100 });
-    const succeeded = list.data.filter(pi => pi.status === 'succeeded');
+    // Recupera PaymentIntent completati (arretrati) + Invoice pagate (abbonamento)
+    const [piList, invList] = await Promise.all([
+      stripe.paymentIntents.list({ limit: 100 }),
+      stripe.invoices.list({ limit: 100, status: 'paid' }),
+    ]);
 
-    // Carica nomi allievi per gli ID presenti in metadata
-    const allievoIds = [...new Set(succeeded.map(pi => pi.metadata?.allievo_id).filter(Boolean))];
+    const piSucceeded = piList.data.filter(pi => pi.status === 'succeeded');
+
+    // Raccoglie allievo_id da PI e da Invoice (via subscription metadata)
+    const allievoIdSet = new Set();
+    piSucceeded.forEach(pi => { if (pi.metadata?.allievo_id) allievoIdSet.add(pi.metadata.allievo_id); });
+    invList.data.forEach(inv => { if (inv.metadata?.allievo_id) allievoIdSet.add(inv.metadata.allievo_id); });
+
+    // Risolve i customer_id degli abbonamenti → allievo_id via DB
+    const customerIds = [...new Set(invList.data.map(inv => inv.customer).filter(Boolean))];
     let allievi = {};
-    if (allievoIds.length) {
-      const { rows } = await pool.query(
-        `SELECT id, nome, cognome FROM allievi WHERE id = ANY($1::int[])`,
-        [allievoIds.map(Number)]
+    if (customerIds.length || allievoIdSet.size) {
+      const allRows = await pool.query(
+        `SELECT id, nome, cognome, stripe_customer_id FROM allievi
+         WHERE id = ANY($1::int[]) OR stripe_customer_id = ANY($2::text[])`,
+        [[...allievoIdSet].map(Number), customerIds]
       );
-      rows.forEach(r => { allievi[r.id] = `${r.nome} ${r.cognome}`; });
+      allRows.rows.forEach(r => {
+        allievi[String(r.id)] = { nome: `${r.nome} ${r.cognome}`, customerId: r.stripe_customer_id };
+        if (r.stripe_customer_id) allievi[r.stripe_customer_id] = { nome: `${r.nome} ${r.cognome}`, id: r.id };
+      });
     }
 
-    const pagamenti = succeeded.map(pi => {
+    const getNome = (allievoId, customerId) => {
+      if (allievoId && allievi[String(allievoId)]) return allievi[String(allievoId)].nome;
+      if (customerId && allievi[customerId]) return allievi[customerId].nome;
+      return allievoId ? `ID ${allievoId}` : '—';
+    };
+
+    // PaymentIntent (pagamenti arretrati)
+    const pagamenti = piSucceeded.map(pi => {
       const mesi = pi.metadata?.mesi ? JSON.parse(pi.metadata.mesi) : [];
-      const allievoId = pi.metadata?.allievo_id;
       return {
         id: pi.id,
+        tipo: 'arretrati',
         importo: pi.amount / 100,
         data: new Date(pi.created * 1000).toISOString(),
-        allievo_id: allievoId || null,
-        allievo_nome: allievoId ? (allievi[parseInt(allievoId)] || `ID ${allievoId}`) : '—',
+        allievo_nome: getNome(pi.metadata?.allievo_id, pi.customer),
         mesi,
         descrizione: pi.description || '',
       };
     });
 
-    // Ordina dal più recente
+    // Invoice (abbonamenti mensili)
+    invList.data.forEach(inv => {
+      if (!inv.amount_paid) return;
+      pagamenti.push({
+        id: inv.id,
+        tipo: 'abbonamento',
+        importo: inv.amount_paid / 100,
+        data: new Date(inv.created * 1000).toISOString(),
+        allievo_nome: getNome(inv.metadata?.allievo_id, inv.customer),
+        mesi: [],
+        descrizione: 'Abbonamento mensile',
+      });
+    });
+
     pagamenti.sort((a, b) => new Date(b.data) - new Date(a.data));
     res.json(pagamenti);
   } catch (err) {
