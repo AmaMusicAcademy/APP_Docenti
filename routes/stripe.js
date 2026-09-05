@@ -123,6 +123,7 @@ router.post('/stripe/payment-intent', ...requireRole('allievo'), async (req, res
   try {
     const customerId = await getOrCreateCustomer(req.user.allievoId);
     const totale = mesi.reduce((s, m) => s + Math.round(parseFloat(m.importo) * 100), 0);
+    if (totale < 50) return res.status(400).json({ error: `L'importo minimo per il pagamento è €0.50. Totale calcolato: €${(totale/100).toFixed(2)}` });
     const desc   = mesi.map(m => `${MESI_NOME[m.mese]} ${m.anno}`).join(', ');
 
     const intent = await stripe.paymentIntents.create({
