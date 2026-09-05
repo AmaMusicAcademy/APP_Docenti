@@ -222,4 +222,53 @@ router.get('/stripe/config', (req, res) => {
   res.json({ publishableKey: process.env.STRIPE_PUBLISHABLE_KEY });
 });
 
+// ── GET /api/stripe/pagamenti-admin — lista PaymentIntent completati (solo admin)
+router.get('/stripe/pagamenti-admin', async (req, res) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader) return res.status(401).json({ error: 'Non autorizzato' });
+  try {
+    const jwt = require('jsonwebtoken');
+    const decoded = jwt.verify(authHeader.replace('Bearer ', ''), process.env.JWT_SECRET);
+    if (decoded.ruolo !== 'admin') return res.status(403).json({ error: 'Solo admin' });
+  } catch { return res.status(401).json({ error: 'Token non valido' }); }
+
+  try {
+    // Recupera ultimi 100 PaymentIntent con status succeeded
+    const list = await stripe.paymentIntents.list({ limit: 100 });
+    const succeeded = list.data.filter(pi => pi.status === 'succeeded');
+
+    // Carica nomi allievi per gli ID presenti in metadata
+    const allievoIds = [...new Set(succeeded.map(pi => pi.metadata?.allievo_id).filter(Boolean))];
+    let allievi = {};
+    if (allievoIds.length) {
+      const { rows } = await pool.query(
+        `SELECT id, nome, cognome FROM allievi WHERE id = ANY($1::int[])`,
+        [allievoIds.map(Number)]
+      );
+      rows.forEach(r => { allievi[r.id] = `${r.nome} ${r.cognome}`; });
+    }
+
+    const pagamenti = succeeded.map(pi => {
+      const mesi = pi.metadata?.mesi ? JSON.parse(pi.metadata.mesi) : [];
+      const allievoId = pi.metadata?.allievo_id;
+      return {
+        id: pi.id,
+        importo: pi.amount / 100,
+        data: new Date(pi.created * 1000).toISOString(),
+        allievo_id: allievoId || null,
+        allievo_nome: allievoId ? (allievi[parseInt(allievoId)] || `ID ${allievoId}`) : '—',
+        mesi,
+        descrizione: pi.description || '',
+      };
+    });
+
+    // Ordina dal più recente
+    pagamenti.sort((a, b) => new Date(b.data) - new Date(a.data));
+    res.json(pagamenti);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;
