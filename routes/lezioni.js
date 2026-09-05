@@ -31,6 +31,7 @@ const { getAnnoAccademico } = require('../utils/annoAccademico');
     await pool.query(`ALTER TABLE lezioni ADD COLUMN IF NOT EXISTS gruppo_id INTEGER REFERENCES gruppi(id) ON DELETE SET NULL`).catch(() => {});
     await pool.query(`ALTER TABLE lezioni ADD COLUMN IF NOT EXISTS nome_gruppo TEXT`).catch(() => {});
     await pool.query(`ALTER TABLE lezioni ALTER COLUMN id_allievo DROP NOT NULL`).catch(() => {});
+    await pool.query(`ALTER TABLE lezioni ADD COLUMN IF NOT EXISTS serie_id UUID`).catch(() => {});
   } catch (e) {
     console.error('[lezioni] migration error:', e.message);
   }
@@ -234,16 +235,18 @@ router.post('/lezioni', authenticateToken, async (req, res) => {
       nomeGruppo = gRes.rows[0]?.nome || null;
     }
 
+    const { serie_id = null } = req.body;
+
     const insert = await pool.query(
-      `INSERT INTO lezioni (id_insegnante, id_allievo, gruppo_id, nome_gruppo, tipo, data, ora_inizio, ora_fine, aula, stato, motivazione, riprogrammata)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,false) RETURNING *`,
+      `INSERT INTO lezioni (id_insegnante, id_allievo, gruppo_id, nome_gruppo, tipo, data, ora_inizio, ora_fine, aula, stato, motivazione, riprogrammata, serie_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,false,$12) RETURNING *`,
       [
         id_insegnante,
         isCollettiva ? null : id_allievo,
         isCollettiva ? gruppo_id : null,
         isCollettiva ? nomeGruppo : null,
         isCollettiva ? 'collettiva' : 'individuale',
-        data, ora_inizio, ora_fine, aula, stato, motivazione,
+        data, ora_inizio, ora_fine, aula, stato, motivazione, serie_id || null,
       ]
     );
     const row = insert.rows[0];
@@ -296,6 +299,47 @@ router.get('/lezioni/:id', async (req, res) => {
     res.json(rows[0]);
   } catch (err) {
     res.status(500).json({ error: 'Errore nel recupero lezione' });
+  }
+});
+
+// PUT /api/lezioni/serie/:serieId — aggiorna tutte le lezioni della serie dalla data in poi
+router.put('/lezioni/serie/:serieId', authenticateToken, async (req, res) => {
+  const { serieId } = req.params;
+  const { data_dal, ora_inizio, ora_fine, aula } = req.body;
+
+  if (!serieId || !data_dal) {
+    return res.status(400).json({ error: 'serie_id e data_dal sono obbligatori' });
+  }
+
+  try {
+    // Verifica autorizzazione: prendi un campione della serie
+    const sample = await pool.query(
+      `SELECT id_insegnante FROM lezioni WHERE serie_id=$1 LIMIT 1`, [serieId]
+    );
+    if (!sample.rows.length) return res.status(404).json({ error: 'Serie non trovata' });
+
+    if (req.user.ruolo !== 'admin' && String(req.user.insegnanteId) !== String(sample.rows[0].id_insegnante)) {
+      return res.status(403).json({ error: 'Accesso non autorizzato' });
+    }
+
+    const fields = [];
+    const vals   = [serieId, data_dal];
+    let idx = 3;
+    if (ora_inizio) { fields.push(`ora_inizio=$${idx++}`); vals.push(ora_inizio); }
+    if (ora_fine)   { fields.push(`ora_fine=$${idx++}`);   vals.push(ora_fine); }
+    if (aula)       { fields.push(`aula=$${idx++}`);       vals.push(aula); }
+
+    if (!fields.length) return res.status(400).json({ error: 'Nessun campo da aggiornare' });
+
+    const { rowCount } = await pool.query(
+      `UPDATE lezioni SET ${fields.join(', ')} WHERE serie_id=$1 AND data >= $2`,
+      vals
+    );
+
+    res.json({ updated: rowCount });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Errore nell'aggiornamento della serie" });
   }
 });
 
