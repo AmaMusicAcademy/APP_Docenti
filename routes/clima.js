@@ -99,8 +99,11 @@ pool.query(`
     updated_at           TIMESTAMPTZ DEFAULT NOW()
   )
 `).catch(() => {});
-// Migrazione: aggiunge colonna se non esiste su DB già creati
+// Migrazioni colonne aggiunte successivamente
 pool.query(`ALTER TABLE clima_target ADD COLUMN IF NOT EXISTS modalita TEXT DEFAULT 'riscaldamento'`).catch(() => {});
+pool.query(`ALTER TABLE clima_target ADD COLUMN IF NOT EXISTS device_id_ir_ac TEXT`).catch(() => {});
+pool.query(`ALTER TABLE clima_target ADD COLUMN IF NOT EXISTS temperatura_ir_target NUMERIC(4,1) DEFAULT 22`).catch(() => {});
+pool.query(`ALTER TABLE clima_target ADD COLUMN IF NOT EXISTS fan_speed INTEGER DEFAULT 1`).catch(() => {});
 
 // ── Middleware credenziali ────────────────────────────────────────────────
 function requireSwitchbot(req, res, next) {
@@ -294,7 +297,7 @@ router.post('/clima/target', authenticateToken, requireSwitchbot, async (req, re
     return res.status(403).json({ error: 'Controllo disponibile solo durante le ore di lezione' });
   }
 
-  const { aula_nome, device_id_termometro, device_id_valvola, temperatura_target, attivo = true, modalita } = req.body;
+  const { aula_nome, device_id_termometro, device_id_valvola, device_id_ir_ac, temperatura_target, attivo = true, modalita } = req.body;
 
   if (Array.isArray(auleAutorizzate) && !auleAutorizzate.includes(aula_nome)) {
     return res.status(403).json({ error: 'Puoi modificare solo la temperatura della tua aula' });
@@ -303,23 +306,24 @@ router.post('/clima/target', authenticateToken, requireSwitchbot, async (req, re
   if (modalita && Array.isArray(auleAutorizzate)) {
     return res.status(403).json({ error: 'Solo l\'amministratore può cambiare la modalità impianto' });
   }
-  if (!aula_nome || !device_id_valvola || !temperatura_target) {
-    return res.status(400).json({ error: 'Campi obbligatori: aula_nome, device_id_valvola, temperatura_target' });
+  if (!aula_nome || (!device_id_valvola && !device_id_ir_ac) || !temperatura_target) {
+    return res.status(400).json({ error: 'Campi obbligatori: aula_nome, device_id_valvola o device_id_ir_ac, temperatura_target' });
   }
 
   try {
     const { rows } = await pool.query(`
-      INSERT INTO clima_target (aula_nome, device_id_termometro, device_id_valvola, temperatura_target, attivo, modalita, updated_at)
-      VALUES ($1, $2, $3, $4, $5, $6, NOW())
+      INSERT INTO clima_target (aula_nome, device_id_termometro, device_id_valvola, device_id_ir_ac, temperatura_target, attivo, modalita, updated_at)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
       ON CONFLICT (aula_nome) DO UPDATE SET
         device_id_termometro = EXCLUDED.device_id_termometro,
         device_id_valvola    = EXCLUDED.device_id_valvola,
+        device_id_ir_ac      = COALESCE(EXCLUDED.device_id_ir_ac, clima_target.device_id_ir_ac),
         temperatura_target   = EXCLUDED.temperatura_target,
         attivo               = EXCLUDED.attivo,
         modalita             = COALESCE(EXCLUDED.modalita, clima_target.modalita),
         updated_at           = NOW()
       RETURNING *
-    `, [aula_nome, device_id_termometro || null, device_id_valvola, temperatura_target, attivo, modalita || 'riscaldamento']);
+    `, [aula_nome, device_id_termometro || null, device_id_valvola || null, device_id_ir_ac || null, temperatura_target, attivo, modalita || 'riscaldamento']);
 
     // Se attivato, avvia subito un ciclo di controllo
     if (attivo) avviaControlloClima().catch(console.error);
@@ -385,5 +389,89 @@ async function avviaControlloClima() {
     }
   }
 }
+
+// ── Invia comando setAll a un IR AC via Hub Mini ──────────────────────────
+// modalita: 'auto'|'raffrescamento'|'riscaldamento'|'deumidificazione'|'ventilazione'
+// fan_speed: 1=auto, 2=low, 3=medium, 4=high
+function modalitaCodice(modalita) {
+  const map = { auto: 1, raffrescamento: 2, deumidificazione: 3, ventilazione: 4, riscaldamento: 5 };
+  return map[modalita] ?? 1;
+}
+
+async function inviaComandoIRAC(deviceId, temperatura, modalita, fanSpeed) {
+  const tempInt  = Math.round(Math.min(30, Math.max(16, temperatura)));
+  const modeCode = modalitaCodice(modalita);
+  const fan      = fanSpeed ?? 1;
+  const parameter = `${tempInt},${modeCode},${fan},on`;
+  const result = await switchbotRequest(
+    `/v1.1/devices/${deviceId}/commands`,
+    'POST',
+    { commandType: 'command', command: 'setAll', parameter }
+  );
+  const statusCode = result?.statusCode ?? result?.status ?? '?';
+  console.log(`[clima-ir] deviceId=${deviceId} setAll="${parameter}" → ${statusCode}`);
+  return result;
+}
+
+// ── POST /api/clima/ir-ac/:deviceId/imposta ───────────────────────────────
+// body: { temperatura, modalita, fan_speed, aula_nome }
+// Invia setAll all'AC IR e salva l'ultima impostazione in clima_target
+router.post('/clima/ir-ac/:deviceId/imposta', authenticateToken, requireSwitchbot, async (req, res) => {
+  const auleAutorizzate = await checkInsegnante(req);
+  if (auleAutorizzate === false) {
+    return res.status(403).json({ error: 'Controllo disponibile solo durante le ore di lezione' });
+  }
+
+  const { deviceId } = req.params;
+  const { temperatura, modalita = 'auto', fan_speed = 1, aula_nome } = req.body;
+
+  if (!temperatura) return res.status(400).json({ error: 'temperatura obbligatoria' });
+
+  // Verifica che l'insegnante possa controllare questa aula
+  if (Array.isArray(auleAutorizzate) && aula_nome && !auleAutorizzate.includes(aula_nome)) {
+    return res.status(403).json({ error: 'Dispositivo non associato alla tua aula' });
+  }
+
+  try {
+    const result = await inviaComandoIRAC(deviceId, parseFloat(temperatura), modalita, parseInt(fan_speed));
+
+    // Aggiorna l'ultima impostazione IR nel DB (upsert se aula_nome fornito)
+    if (aula_nome) {
+      await pool.query(`
+        INSERT INTO clima_target (aula_nome, device_id_ir_ac, temperatura_ir_target, modalita, fan_speed, updated_at)
+        VALUES ($1, $2, $3, $4, $5, NOW())
+        ON CONFLICT (aula_nome) DO UPDATE SET
+          device_id_ir_ac     = EXCLUDED.device_id_ir_ac,
+          temperatura_ir_target = EXCLUDED.temperatura_ir_target,
+          modalita            = EXCLUDED.modalita,
+          fan_speed           = EXCLUDED.fan_speed,
+          updated_at          = NOW()
+      `, [aula_nome, deviceId, parseFloat(temperatura), modalita, parseInt(fan_speed)]);
+    }
+
+    res.json({ ok: true, switchbot: result?.body ?? result });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Errore invio comando IR AC: ' + err.message });
+  }
+});
+
+// ── POST /api/clima/ir-ac/:deviceId/spegni ───────────────────────────────
+router.post('/clima/ir-ac/:deviceId/spegni', authenticateToken, requireSwitchbot, async (req, res) => {
+  const auleAutorizzate = await checkInsegnante(req);
+  if (auleAutorizzate === false) {
+    return res.status(403).json({ error: 'Controllo disponibile solo durante le ore di lezione' });
+  }
+  try {
+    const result = await switchbotRequest(
+      `/v1.1/devices/${req.params.deviceId}/commands`,
+      'POST',
+      { commandType: 'command', command: 'turnOff', parameter: 'default' }
+    );
+    res.json({ ok: true, switchbot: result?.body ?? result });
+  } catch (err) {
+    res.status(500).json({ error: 'Errore spegnimento IR AC: ' + err.message });
+  }
+});
 
 module.exports = { router, avviaControlloClima };
