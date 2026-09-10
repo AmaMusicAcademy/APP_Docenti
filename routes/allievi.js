@@ -230,14 +230,18 @@ router.get('/allievi/:id/conteggio-lezioni', async (req, res) => {
        ) sub GROUP BY stato, riprogrammata`,
       params
     );
-    const result = { svolte: 0, annullate: 0, rimandate: 0, riprogrammate: 0 };
+    const result = { svolte: 0, annullate: 0, rimandate: 0, riprogrammate: 0, recuperate: 0 };
     for (const row of rows) {
       const n = parseInt(row.count, 10);
-      if (row.stato === 'svolta') result.svolte += n;
-      else if (row.stato === 'annullata') result.annullate += n;
+      if (row.stato === 'svolta') {
+        result.svolte += n;
+        if (row.riprogrammata) result.recuperate += n;
+      } else if (row.stato === 'annullata') result.annullate += n;
       else if (row.stato === 'rimandata') {
         if (row.riprogrammata) result.riprogrammate += n;
         else result.rimandate += n;
+      } else if (row.riprogrammata && (row.stato === 'appuntamentata')) {
+        result.recuperate += n;
       }
     }
     res.json(result);

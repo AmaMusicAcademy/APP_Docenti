@@ -319,14 +319,15 @@ router.get('/allievo/riepilogo-anno', ...requireRole('allievo'), async (req, res
   try {
     const { rows } = await pool.query(
       `SELECT
-         COUNT(*) FILTER (WHERE stato = 'svolta')         AS svolte,
-         COUNT(*) FILTER (WHERE stato = 'rimandata')      AS rimandate,
-         COUNT(*) FILTER (WHERE stato = 'annullata')      AS annullate,
-         COUNT(*) FILTER (WHERE stato = 'appuntamentata') AS future
+         COUNT(*) FILTER (WHERE stato = 'svolta')                                AS svolte,
+         COUNT(*) FILTER (WHERE stato = 'rimandata')                             AS rimandate,
+         COUNT(*) FILTER (WHERE stato = 'annullata')                             AS annullate,
+         COUNT(*) FILTER (WHERE stato = 'appuntamentata')                        AS future,
+         COUNT(*) FILTER (WHERE riprogrammata = true AND stato IN ('svolta','appuntamentata')) AS recuperate
        FROM (
-         SELECT stato FROM lezioni WHERE id_allievo = $1 AND anno_accademico IS NULL
+         SELECT stato, riprogrammata FROM lezioni WHERE id_allievo = $1 AND anno_accademico IS NULL
          UNION ALL
-         SELECT l.stato FROM lezioni l
+         SELECT l.stato, l.riprogrammata FROM lezioni l
          JOIN lezioni_partecipanti lp ON lp.lezione_id = l.id AND lp.allievo_id = $1
          WHERE l.tipo = 'collettiva' AND l.anno_accademico IS NULL
        ) sub`,
