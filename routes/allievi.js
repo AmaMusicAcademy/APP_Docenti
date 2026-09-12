@@ -152,7 +152,13 @@ router.delete('/allievi/:id', ...requireRole('admin'), async (req, res) => {
 
 // PATCH /api/allievi/:id  — aggiornamento parziale anagrafica (solo admin)
 router.patch('/allievi/:id', ...requireRole('admin'), async (req, res) => {
-  const campi = ['nome','cognome','email','telefono','indirizzo','strumento','data_nascita','data_iscrizione','quota_mensile','note'];
+  const campi = [
+    'nome','cognome','email','telefono','indirizzo','cap','citta','provincia',
+    'codice_fiscale','luogo_nascita','strumento','data_nascita','data_iscrizione',
+    'quota_mensile','note','minore',
+    'genitore_nome','genitore_cognome','genitore_cf','genitore_data_nascita',
+    'genitore_luogo_nascita','genitore_indirizzo','genitore_telefono','genitore_email',
+  ];
   const sets = []; const vals = [];
   campi.forEach(c => {
     if (req.body[c] !== undefined) { sets.push(`${c} = $${vals.length+1}`); vals.push(req.body[c] ?? null); }
