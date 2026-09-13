@@ -17,7 +17,8 @@ pool.query(`
   ADD COLUMN IF NOT EXISTS telefono          TEXT,
   ADD COLUMN IF NOT EXISTS email             TEXT,
   ADD COLUMN IF NOT EXISTS indirizzo         TEXT,
-  ADD COLUMN IF NOT EXISTS data_nascita      DATE
+  ADD COLUMN IF NOT EXISTS data_nascita      DATE,
+  ADD COLUMN IF NOT EXISTS colore            TEXT
 `).catch(() => {});
 
 // GET /api/insegnante/me
@@ -150,7 +151,7 @@ router.get('/insegnanti/:id/lezioni', authenticateToken, async (req, res) => {
 // PATCH /api/insegnanti/:id  — aggiorna anagrafica (solo admin)
 router.patch('/insegnanti/:id', ...requireRole('admin'), async (req, res) => {
   const { id } = req.params;
-  const campi = ['nome','cognome','username','telefono','email','indirizzo','data_nascita','data_inizio'];
+  const campi = ['nome','cognome','username','telefono','email','indirizzo','data_nascita','data_inizio','colore'];
   const sets = []; const vals = [];
   campi.forEach(c => {
     if (req.body[c] !== undefined) { sets.push(`${c} = $${vals.length+1}`); vals.push(req.body[c] || null); }
