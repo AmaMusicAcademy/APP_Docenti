@@ -223,14 +223,7 @@ router.get('/stripe/config', (req, res) => {
 });
 
 // ── GET /api/stripe/pagamenti-admin — lista PaymentIntent completati (solo admin)
-router.get('/stripe/pagamenti-admin', async (req, res) => {
-  const authHeader = req.headers.authorization;
-  if (!authHeader) return res.status(401).json({ error: 'Non autorizzato' });
-  try {
-    const jwt = require('jsonwebtoken');
-    const decoded = jwt.verify(authHeader.replace('Bearer ', ''), process.env.JWT_SECRET);
-    if (decoded.ruolo !== 'admin') return res.status(403).json({ error: 'Solo admin' });
-  } catch { return res.status(401).json({ error: 'Token non valido' }); }
+router.get('/stripe/pagamenti-admin', ...requireRole('admin'), async (req, res) => {
 
   try {
     // Recupera PaymentIntent completati (arretrati) + Invoice pagate (abbonamento)
