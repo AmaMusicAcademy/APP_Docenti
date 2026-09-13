@@ -9,6 +9,9 @@ const router = express.Router();
 const JWT_SECRET = process.env.JWT_SECRET || 'supersegreto';
 
 pool.query(`ALTER TABLE utenti ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN DEFAULT FALSE`).catch(() => {});
+pool.query(`ALTER TABLE utenti ADD COLUMN IF NOT EXISTS ultimo_accesso TIMESTAMPTZ`).catch(() => {});
+pool.query(`ALTER TABLE utenti ADD COLUMN IF NOT EXISTS pwa_installata BOOLEAN`).catch(() => {});
+pool.query(`ALTER TABLE utenti ADD COLUMN IF NOT EXISTS user_agent TEXT`).catch(() => {});
 
 const storage = multer.diskStorage({
   destination: (_req, _file, cb) => cb(null, 'uploads/'),
@@ -50,6 +53,14 @@ router.post('/login', async (req, res) => {
     let allievoId = user.allievo_id || null;
 
     const mustChangePassword = !!user.must_change_password;
+
+    // Salva ultimo accesso, modalità display e user agent
+    const pwaInstallata = req.body.pwa_installata === true || req.body.pwa_installata === 'true';
+    const userAgent = req.body.user_agent || req.headers['user-agent'] || null;
+    pool.query(
+      `UPDATE utenti SET ultimo_accesso=NOW(), pwa_installata=$1, user_agent=$2 WHERE id=$3`,
+      [pwaInstallata, userAgent, user.id]
+    ).catch(() => {});
 
     const token = jwt.sign(
       { userId: user.id, username: user.username, ruolo: user.ruolo, insegnanteId, allievoId, mustChangePassword },

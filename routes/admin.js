@@ -379,4 +379,27 @@ router.get('/debug-utenti', async (_req, res) => {
   }
 });
 
+// GET /api/admin/accessi — stato accessi allievi (ultimo login, PWA, mai acceduto)
+router.get('/admin/accessi', ...requireRole('admin'), async (_req, res) => {
+  try {
+    const { rows } = await pool.query(`
+      SELECT
+        a.id, a.nome, a.cognome, a.email, a.strumento, a.attivo,
+        u.username,
+        u.ultimo_accesso,
+        u.pwa_installata,
+        u.user_agent,
+        u.must_change_password AS mai_acceduto
+      FROM allievi a
+      LEFT JOIN utenti u ON u.allievo_id = a.id
+      WHERE a.attivo = TRUE
+      ORDER BY a.cognome, a.nome
+    `);
+    res.json(rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Errore' });
+  }
+});
+
 module.exports = router;
