@@ -403,28 +403,69 @@ router.get('/admin/accessi', ...requireRole('admin'), async (_req, res) => {
   }
 });
 
+// ── Helpers WhatsApp ────────────────────────────────────────────────────────
+const MESI_WA = ['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno',
+  'Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'];
+
+async function calcolaInsolutiAllievo(allievoId, dataIscrizione) {
+  const now = new Date();
+  const annoCorrente = now.getFullYear();
+  const meseCorrente = now.getMonth() + 1;
+  const inizio = new Date(`${String(dataIscrizione).slice(0,10)}T00:00:00Z`);
+  const y0 = inizio.getUTCFullYear();
+  const m0 = inizio.getUTCMonth() + 1;
+
+  const { rows: pagamenti } = await pool.query(
+    'SELECT anno, mese FROM pagamenti_mensili WHERE allievo_id = $1', [allievoId]
+  );
+  const pagatiSet = new Set(pagamenti.map(p => `${p.anno}-${p.mese}`));
+
+  const mesiArretrati = [];
+  for (let y = y0; y <= annoCorrente; y++) {
+    const mStart = y === y0 ? m0 : 1;
+    const mEnd   = y === annoCorrente ? meseCorrente : 12;
+    for (let m = mStart; m <= mEnd; m++) {
+      if (!pagatiSet.has(`${y}-${m}`)) mesiArretrati.push({ anno: y, mese: m });
+    }
+  }
+
+  const { rows: tassaRows } = await pool.query(
+    'SELECT pagata FROM quote_associative WHERE allievo_id = $1 AND anno = $2',
+    [allievoId, annoCorrente]
+  );
+  const tassaNonPagata = !tassaRows[0]?.pagata;
+
+  return { mesiArretrati, tassaNonPagata, annoCorrente };
+}
+
+function buildMesiLabel(mesiArretrati, tassaNonPagata, annoCorrente) {
+  const parts = [];
+  if (mesiArretrati.length > 0)
+    parts.push(mesiArretrati.map(({ anno, mese }) => `${MESI_WA[mese-1]} ${anno}`).join(', '));
+  if (tassaNonPagata)
+    parts.push(`tassa associativa ${annoCorrente}`);
+  return parts.join(' e ') || 'quote non saldate';
+}
+// ────────────────────────────────────────────────────────────────────────────
+
 // ── POST /api/admin/whatsapp-reminder/:allievoId  — reminder manuale singolo allievo
 router.post('/admin/whatsapp-reminder/:allievoId', ...requireRole('admin'), async (req, res) => {
   const { allievoId } = req.params;
   try {
     const { rows } = await pool.query(
-      `SELECT a.nome, a.cognome, a.telefono,
-              u.pwa_installata, u.ultimo_accesso
-       FROM allievi a
-       LEFT JOIN utenti u ON u.allievo_id = a.id
-       WHERE a.id = $1 AND a.attivo = TRUE`,
+      'SELECT id, nome, telefono, data_iscrizione FROM allievi WHERE id = $1 AND attivo = TRUE',
       [allievoId]
     );
     if (!rows.length) return res.status(404).json({ error: 'Allievo non trovato' });
     const a = rows[0];
     if (!a.telefono) return res.status(400).json({ error: 'Numero di telefono non presente nella scheda allievo' });
+    if (!a.data_iscrizione) return res.status(400).json({ error: 'Data iscrizione mancante' });
 
-    // Recupera mesi arretrati
-    const { anno, mese } = req.body || {};
-    const mesiLabel = anno && mese
-      ? `${['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'][mese-1]} ${anno}`
-      : 'quote arretrate';
+    const { mesiArretrati, tassaNonPagata, annoCorrente } = await calcolaInsolutiAllievo(a.id, a.data_iscrizione);
+    if (mesiArretrati.length === 0 && !tassaNonPagata)
+      return res.status(400).json({ error: 'Nessun arretrato da segnalare' });
 
+    const mesiLabel = buildMesiLabel(mesiArretrati, tassaNonPagata, annoCorrente);
     const sid = await sendReminderPagamento(a.telefono, a.nome, mesiLabel);
     res.json({ ok: true, sid });
   } catch (err) {
@@ -435,30 +476,23 @@ router.post('/admin/whatsapp-reminder/:allievoId', ...requireRole('admin'), asyn
 
 // ── POST /api/admin/whatsapp-reminder-bulk  — reminder massivo allievi non-PWA con arretrati
 router.post('/admin/whatsapp-reminder-bulk', ...requireRole('admin'), async (req, res) => {
-  const { anno, mese } = req.body || {};
-  if (!anno || !mese) return res.status(400).json({ error: 'anno e mese obbligatori' });
-
   try {
-    // Allievi attivi senza pagamento del mese, con telefono, che NON usano la PWA
     const { rows } = await pool.query(`
-      SELECT a.id, a.nome, a.cognome, a.telefono
+      SELECT a.id, a.nome, a.cognome, a.telefono, a.data_iscrizione
       FROM allievi a
       LEFT JOIN utenti u ON u.allievo_id = a.id
-      LEFT JOIN pagamenti_mensili pm
-        ON pm.allievo_id = a.id AND pm.anno = $1 AND pm.mese = $2
-      WHERE a.attivo = TRUE
+      WHERE a.attivo IS DISTINCT FROM FALSE
         AND a.telefono IS NOT NULL
+        AND a.data_iscrizione IS NOT NULL
         AND (u.pwa_installata IS NULL OR u.pwa_installata = FALSE)
-        AND pm.id IS NULL
-    `, [anno, mese]);
-
-    const MESI_NOME = ['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno',
-      'Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'];
-    const mesiLabel = `${MESI_NOME[mese-1]} ${anno}`;
+    `);
 
     const risultati = [];
     for (const a of rows) {
       try {
+        const { mesiArretrati, tassaNonPagata, annoCorrente } = await calcolaInsolutiAllievo(a.id, a.data_iscrizione);
+        if (mesiArretrati.length === 0 && !tassaNonPagata) continue;
+        const mesiLabel = buildMesiLabel(mesiArretrati, tassaNonPagata, annoCorrente);
         const sid = await sendReminderPagamento(a.telefono, a.nome, mesiLabel);
         risultati.push({ id: a.id, nome: `${a.nome} ${a.cognome}`, ok: true, sid });
       } catch (err) {
@@ -466,34 +500,38 @@ router.post('/admin/whatsapp-reminder-bulk', ...requireRole('admin'), async (req
       }
     }
 
-    const inviati = risultati.filter(r => r.ok).length;
-    const errori  = risultati.filter(r => !r.ok).length;
-    res.json({ inviati, errori, dettaglio: risultati });
+    res.json({ inviati: risultati.filter(r => r.ok).length, errori: risultati.filter(r => !r.ok).length, dettaglio: risultati });
   } catch (err) {
     console.error('[WhatsApp bulk]', err.message);
     res.status(500).json({ error: err.message });
   }
 });
 
-// ── GET /api/admin/whatsapp-insoluti?anno=&mese=  — lista non-PWA con quota non pagata
+// ── GET /api/admin/whatsapp-insoluti  — lista non-PWA con posizione non in regola
 router.get('/admin/whatsapp-insoluti', ...requireRole('admin'), async (req, res) => {
-  const anno = parseInt(req.query.anno);
-  const mese = parseInt(req.query.mese);
-  if (!anno || !mese) return res.status(400).json({ error: 'anno e mese obbligatori' });
   try {
     const { rows } = await pool.query(`
-      SELECT a.id, a.nome, a.cognome, a.telefono,
-             u.pwa_installata, u.ultimo_accesso, u.must_change_password AS mai_acceduto
+      SELECT a.id, a.nome, a.cognome, a.telefono, a.data_iscrizione
       FROM allievi a
       LEFT JOIN utenti u ON u.allievo_id = a.id
-      LEFT JOIN pagamenti_mensili pm
-        ON pm.allievo_id = a.id AND pm.anno = $1 AND pm.mese = $2
-      WHERE a.attivo = TRUE
+      WHERE a.attivo IS DISTINCT FROM FALSE
+        AND a.data_iscrizione IS NOT NULL
         AND (u.pwa_installata IS NULL OR u.pwa_installata = FALSE)
-        AND pm.id IS NULL
       ORDER BY a.cognome, a.nome
-    `, [anno, mese]);
-    res.json(rows);
+    `);
+
+    const risultati = [];
+    for (const a of rows) {
+      const { mesiArretrati, tassaNonPagata, annoCorrente } = await calcolaInsolutiAllievo(a.id, a.data_iscrizione);
+      if (mesiArretrati.length === 0 && !tassaNonPagata) continue;
+      risultati.push({
+        id: a.id, nome: a.nome, cognome: a.cognome, telefono: a.telefono,
+        mesiLabel: buildMesiLabel(mesiArretrati, tassaNonPagata, annoCorrente),
+        nArretrati: mesiArretrati.length, tassaNonPagata,
+      });
+    }
+
+    res.json(risultati);
   } catch (err) {
     console.error('[whatsapp-insoluti]', err.message);
     res.status(500).json({ error: err.message });
