@@ -339,6 +339,16 @@ router.post('/clima/target', authenticateToken, requireSwitchbot, async (req, re
 async function avviaControlloClima() {
   if (!SWITCHBOT_TOKEN || !SWITCHBOT_SECRET) return;
 
+  // Salta il ciclo se i condizionatori risultano spenti oggi
+  const oggi = new Date().toISOString().slice(0, 10);
+  const { rows: statoAC } = await pool.query(
+    `SELECT acceso FROM ac_stato WHERE data = $1`, [oggi]
+  );
+  if (statoAC[0]?.acceso === false) {
+    console.log('[clima] condizionatori spenti — controllo valvole saltato');
+    return;
+  }
+
   const { rows: targets } = await pool.query(
     `SELECT * FROM clima_target WHERE attivo = TRUE AND device_id_valvola IS NOT NULL`
   );
@@ -474,4 +484,4 @@ router.post('/clima/ir-ac/:deviceId/spegni', authenticateToken, requireSwitchbot
   }
 });
 
-module.exports = { router, avviaControlloClima };
+module.exports = { router, avviaControlloClima, setValvePosition };

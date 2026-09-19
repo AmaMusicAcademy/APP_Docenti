@@ -186,6 +186,24 @@ async function eseguiSpegnimento(dispositivi, oggi, motivo) {
        SET acceso = false, ultima_azione = 'spegnimento', aggiornato_il = NOW()`,
     [oggi]
   );
+
+  // Chiudi tutte le valvole attive
+  const { rows: valvole } = await pool.query(
+    `SELECT aula_nome, device_id_valvola FROM clima_target WHERE attivo = TRUE AND device_id_valvola IS NOT NULL`
+  );
+  const { setValvePosition } = require('./clima');
+  for (const v of valvole) {
+    try {
+      await setValvePosition(v.device_id_valvola, 0);
+      await pool.query(
+        `UPDATE clima_target SET posizione_attuale = 0, updated_at = NOW() WHERE aula_nome = $1`,
+        [v.aula_nome]
+      );
+      console.log(`[AC] valvola "${v.aula_nome}" chiusa allo spegnimento`);
+    } catch (e) {
+      console.error(`[AC] errore chiusura valvola "${v.aula_nome}":`, e.message);
+    }
+  }
 }
 
 // ── Helpers orario ────────────────────────────────────────────────────────
