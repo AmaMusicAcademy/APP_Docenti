@@ -41,34 +41,61 @@ function normalizza(s) {
     .replace(/\s+/g, ' ').trim();
 }
 
-// Parsa il testo del messaggio
-// Formato atteso: "nome cognome gen 2026" oppure "nome cognome gen 2026 + tassa"
+// Parole rumore da ignorare nell'estrazione del nome
+const PAROLE_RUMORE = new Set([
+  'paga','pagato','ha','pagato','pago','ha pagato','hanno pagato',
+  'versato','ha versato','saldato','ha saldato',
+  'e','il','la','lo','i','le','gli','di','da','per','con','in',
+  'tassa','associativa','quota','quote','mese','mesi',
+]);
+
+// Parsa il testo del messaggio in modo flessibile.
+// Estrae: nome allievo, mese, anno (default anno corrente), tassa
+// Esempi gestiti:
+//   "mario rossi gen 2026"
+//   "mario rossi gen 2026 + tassa"
+//   "Rossi paga gennaio"
+//   "Mario ha pagato gennaio e tassa"
+//   "mario rossi ha saldato febbraio 2026 e tassa associativa"
 function parsaMessaggio(testo) {
   const t = normalizza(testo);
 
-  // Cerca anno (4 cifre)
+  // Anno: 4 cifre tipo 20xx — opzionale, default anno corrente
   const annoMatch = t.match(/\b(20\d{2})\b/);
-  if (!annoMatch) return null;
-  const anno = parseInt(annoMatch[1], 10);
+  const anno = annoMatch ? parseInt(annoMatch[1], 10) : new Date().getFullYear();
 
-  // Cerca nome mese prima dell'anno
+  // Mese: cerca tutte le chiavi ordinate per lunghezza decrescente (evita match parziali)
+  const chiavi = Object.keys(MESI_IT).sort((a, b) => b.length - a.length);
   let mese = null;
   let meseLabel = null;
-  for (const [chiave, num] of Object.entries(MESI_IT)) {
-    const re = new RegExp(`\\b${chiave}\\b`);
-    if (re.test(t)) { mese = num; meseLabel = MESI_LABEL[num]; break; }
+  let meseChiave = null;
+  for (const chiave of chiavi) {
+    if (new RegExp(`\\b${chiave}\\b`).test(t)) {
+      mese = MESI_IT[chiave];
+      meseLabel = MESI_LABEL[mese];
+      meseChiave = chiave;
+      break;
+    }
   }
   if (!mese) return null;
 
-  // Tassa: "+ tassa" presente?
-  const tassa = /[+]\s*tassa/.test(t);
+  // Tassa: qualsiasi menzione di "tassa" o "associativa"
+  const tassa = /\btassa\b|\bassociativa\b/.test(t);
 
-  // Nome allievo: tutto prima del mese
-  const partiPrimaDiMese = t.split(/\b(gen|feb|mar|apr|mag|giu|lug|ago|set|ott|nov|dic|gennaio|febbraio|marzo|aprile|maggio|giugno|luglio|agosto|settembre|ottobre|novembre|dicembre)\b/)[0].trim();
+  // Estrai nome: rimuovi anno, mese, tassa, parole rumore, punteggiatura
+  let candidato = t
+    .replace(/\b20\d{2}\b/, '')
+    .replace(new RegExp(`\\b${meseChiave}\\b`), '')
+    .replace(/\btassa\b|\bassociativa\b|\bquota\b|\bquote\b/, '')
+    .replace(/[+\-,]/g, ' ')
+    .split(/\s+/)
+    .filter(w => w.length > 1 && !PAROLE_RUMORE.has(w))
+    .join(' ')
+    .trim();
 
-  if (!partiPrimaDiMese) return null;
+  if (!candidato) return null;
 
-  return { nomeRicercato: partiPrimaDiMese, mese, anno, meseLabel, tassa, testoOriginale: testo };
+  return { nomeRicercato: candidato, mese, anno, meseLabel, tassa, testoOriginale: testo };
 }
 
 // Cerca allievo nel DB per nome+cognome (fuzzy: entrambe le parole devono essere presenti)
