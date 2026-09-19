@@ -49,6 +49,7 @@ const { router: climaRouter, avviaControlloClima } = require('./routes/clima');
 app.use('/api', climaRouter);
 const { router: acRouter, controllaAC } = require('./routes/ac');
 app.use('/api', acRouter);
+app.use('/api', require('./routes/whatsapp-inbound'));
 
 // ----------------------
 // Health + debug routes
