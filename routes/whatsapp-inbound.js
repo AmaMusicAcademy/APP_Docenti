@@ -281,6 +281,55 @@ router.post('/admin/pagamenti-contanti-pending/:id/rifiuta', async (req, res) =>
   }
 });
 
+// ── GET /api/admin/pagamenti-contanti-storico ─────────────────────────────
+router.get('/admin/pagamenti-contanti-storico', async (req, res) => {
+  try {
+    const { rows } = await pool.query(`
+      SELECT p.*, a.nome AS allievo_nome, a.cognome AS allievo_cognome
+      FROM pagamenti_contanti_pending p
+      LEFT JOIN allievi a ON a.id = p.allievo_id
+      WHERE p.stato = 'confermato'
+      ORDER BY p.aggiornato_il DESC
+      LIMIT 100
+    `);
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── POST /api/admin/pagamenti-contanti-storico/:id/annulla ────────────────
+router.post('/admin/pagamenti-contanti-storico/:id/annulla', async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT * FROM pagamenti_contanti_pending WHERE id = $1 AND stato = 'confermato'`, [req.params.id]
+    );
+    if (!rows.length) return res.status(404).json({ error: 'Non trovato' });
+    const p = rows[0];
+
+    // Rimuovi pagamento mensile
+    await pool.query(
+      `DELETE FROM pagamenti_mensili WHERE allievo_id = $1 AND anno = $2 AND mese = $3`,
+      [p.allievo_id, p.anno, p.mese]
+    );
+    // Rimuovi tassa se era inclusa
+    if (p.include_tassa) {
+      await pool.query(
+        `UPDATE quote_associative SET pagata = FALSE, data_pagamento = NULL WHERE allievo_id = $1 AND anno = $2`,
+        [p.allievo_id, p.anno]
+      );
+    }
+    // Riporta in stato rifiutato (rimosso dallo storico)
+    await pool.query(
+      `UPDATE pagamenti_contanti_pending SET stato = 'annullato', aggiornato_il = NOW() WHERE id = $1`,
+      [req.params.id]
+    );
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── GET /api/admin/allievi-attivi — lista compatta per abbinamento ─────────
 router.get('/admin/allievi-attivi', async (req, res) => {
   try {
