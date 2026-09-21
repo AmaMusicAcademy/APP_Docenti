@@ -20,8 +20,14 @@ async function sendReminderPagamento(telefono, nome, mesiLabel) {
   }
   if (!telefono) throw new Error('Numero di telefono mancante');
 
-  const to = `whatsapp:${telefono.replace(/\s/g, '')}`;
+  // Normalizza in formato E.164: rimuovi spazi/trattini, aggiungi +39 se manca prefisso
+  let num = telefono.replace(/[\s\-().]/g, '');
+  if (!num.startsWith('+')) {
+    num = num.startsWith('39') ? `+${num}` : `+39${num}`;
+  }
+  const to = `whatsapp:${num}`;
 
+  console.log(`[WA] invio a ${to} from=${FROM} template=${TEMPLATE_SID} nome="${nome}" mesi="${mesiLabel}"`);
   const msg = await client.messages.create({
     from:        FROM,
     to,
