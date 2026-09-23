@@ -451,9 +451,10 @@ function buildMesiLabel(mesiArretrati, tassaNonPagata, annoCorrente) {
 // ── POST /api/admin/whatsapp-reminder/:allievoId  — reminder manuale singolo allievo
 router.post('/admin/whatsapp-reminder/:allievoId', ...requireRole('admin'), async (req, res) => {
   const { allievoId } = req.params;
+  const { force } = req.body;
   try {
     const { rows } = await pool.query(
-      'SELECT id, nome, telefono, data_iscrizione FROM allievi WHERE id = $1 AND attivo = TRUE',
+      'SELECT id, nome, telefono, data_iscrizione, wa_reminder_inviato_il FROM allievi WHERE id = $1 AND attivo IS DISTINCT FROM FALSE',
       [allievoId]
     );
     if (!rows.length) return res.status(404).json({ error: 'Allievo non trovato' });
@@ -461,12 +462,27 @@ router.post('/admin/whatsapp-reminder/:allievoId', ...requireRole('admin'), asyn
     if (!a.telefono) return res.status(400).json({ error: 'Numero di telefono non presente nella scheda allievo' });
     if (!a.data_iscrizione) return res.status(400).json({ error: 'Data iscrizione mancante' });
 
+    // Controllo invio recente (7 giorni) — a meno che force=true
+    if (!force && a.wa_reminder_inviato_il) {
+      const giorni = Math.floor((Date.now() - new Date(a.wa_reminder_inviato_il).getTime()) / 86400000);
+      if (giorni < 7) {
+        return res.status(409).json({
+          already_sent: true,
+          giorni,
+          data: a.wa_reminder_inviato_il,
+        });
+      }
+    }
+
     const { mesiArretrati, tassaNonPagata, annoCorrente } = await calcolaInsolutiAllievo(a.id, a.data_iscrizione);
     if (mesiArretrati.length === 0 && !tassaNonPagata)
       return res.status(400).json({ error: 'Nessun arretrato da segnalare' });
 
     const mesiLabel = buildMesiLabel(mesiArretrati, tassaNonPagata, annoCorrente);
     const sid = await sendReminderPagamento(a.telefono, a.nome, mesiLabel);
+
+    await pool.query('UPDATE allievi SET wa_reminder_inviato_il = NOW() WHERE id = $1', [allievoId]);
+
     res.json({ ok: true, sid });
   } catch (err) {
     console.error('[WhatsApp reminder]', err.message);
@@ -494,6 +510,7 @@ router.post('/admin/whatsapp-reminder-bulk', ...requireRole('admin'), async (req
         if (mesiArretrati.length === 0 && !tassaNonPagata) continue;
         const mesiLabel = buildMesiLabel(mesiArretrati, tassaNonPagata, annoCorrente);
         const sid = await sendReminderPagamento(a.telefono, a.nome, mesiLabel);
+        await pool.query('UPDATE allievi SET wa_reminder_inviato_il = NOW() WHERE id = $1', [a.id]);
         risultati.push({ id: a.id, nome: `${a.nome} ${a.cognome}`, ok: true, sid });
       } catch (err) {
         risultati.push({ id: a.id, nome: `${a.nome} ${a.cognome}`, ok: false, error: err.message });
@@ -511,7 +528,7 @@ router.post('/admin/whatsapp-reminder-bulk', ...requireRole('admin'), async (req
 router.get('/admin/whatsapp-insoluti', ...requireRole('admin'), async (req, res) => {
   try {
     const { rows } = await pool.query(`
-      SELECT a.id, a.nome, a.cognome, a.telefono, a.data_iscrizione
+      SELECT a.id, a.nome, a.cognome, a.telefono, a.data_iscrizione, a.wa_reminder_inviato_il
       FROM allievi a
       LEFT JOIN utenti u ON u.allievo_id = a.id
       WHERE a.attivo IS DISTINCT FROM FALSE
@@ -528,6 +545,7 @@ router.get('/admin/whatsapp-insoluti', ...requireRole('admin'), async (req, res)
         id: a.id, nome: a.nome, cognome: a.cognome, telefono: a.telefono,
         mesiLabel: buildMesiLabel(mesiArretrati, tassaNonPagata, annoCorrente),
         nArretrati: mesiArretrati.length, tassaNonPagata,
+        wa_reminder_inviato_il: a.wa_reminder_inviato_il,
       });
     }
 

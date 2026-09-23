@@ -98,6 +98,7 @@ async function avviaMigrazioni() {
     `ALTER TABLE quote_associative  ADD COLUMN IF NOT EXISTS anno_accademico TEXT`,
     `ALTER TABLE gruppi             ADD COLUMN IF NOT EXISTS anno_accademico TEXT`,
     `ALTER TABLE iscrizioni         ADD COLUMN IF NOT EXISTS anno_accademico TEXT`,
+    `ALTER TABLE allievi            ADD COLUMN IF NOT EXISTS wa_reminder_inviato_il TIMESTAMPTZ`,
   ];
   for (const sql of migrazioni) {
     try { await pool.query(sql); } catch (e) { console.error('Migrazione fallita:', sql, e.message); }
