@@ -110,9 +110,9 @@ avviaMigrazioni().then(() => {
     console.log(`Server AMA in ascolto sulla porta ${PORT}`);
     avviaCron();
     avviaQontoCron();
-    // Controllo clima ogni 5 minuti
-    schedule.scheduleJob('*/5 * * * *', () => avviaControlloClima().catch(console.error));
-    console.log('Cron controllo clima avviato (ogni 5 minuti)');
+    // Controllo clima ogni 10 minuti
+    schedule.scheduleJob('*/10 * * * *', () => avviaControlloClima().catch(console.error));
+    console.log('Cron controllo clima avviato (ogni 10 minuti)');
     // Controllo AC ogni minuto
     schedule.scheduleJob('* * * * *', () => controllaAC().catch(console.error));
     console.log('Cron controllo AC avviato (ogni minuto)');
