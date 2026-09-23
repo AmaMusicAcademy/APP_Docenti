@@ -5,18 +5,18 @@ const { pool } = require('../db');
 const router = express.Router();
 
 const MESI_IT = {
-  gen: 1, gennaio: 1,
-  feb: 2, febbraio: 2,
-  mar: 3, marzo: 3,
-  apr: 4, aprile: 4,
-  mag: 5, maggio: 5,
-  giu: 6, giugno: 6,
-  lug: 7, luglio: 7,
-  ago: 8, agosto: 8,
-  set: 9, settembre: 9,
-  ott: 10, ottobre: 10,
-  nov: 11, novembre: 11,
-  dic: 12, dicembre: 12,
+  gennaio: 1,  gen: 1,  genn: 1,
+  febbraio: 2, feb: 2,  febb: 2,
+  marzo: 3,    mar: 3,  marz: 3,
+  aprile: 4,   apr: 4,  apri: 4,
+  maggio: 5,   mag: 5,  magg: 5,
+  giugno: 6,   giu: 6,  giug: 6,
+  luglio: 7,   lug: 7,  lugl: 7,
+  agosto: 8,   ago: 8,  agos: 8,
+  settembre: 9, set: 9, sett: 9, sette: 9,
+  ottobre: 10, ott: 10, otto: 10,
+  novembre: 11, nov: 11, nove: 11,
+  dicembre: 12, dic: 12, dice: 12,
 };
 const MESI_LABEL = ['','Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno',
   'Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'];
@@ -43,10 +43,10 @@ function normalizza(s) {
 
 // Parole rumore da ignorare nell'estrazione del nome
 const PAROLE_RUMORE = new Set([
-  'paga','pagato','ha','pagato','pago','ha pagato','hanno pagato',
-  'versato','ha versato','saldato','ha saldato',
-  'e','il','la','lo','i','le','gli','di','da','per','con','in',
-  'tassa','associativa','quota','quote','mese','mesi',
+  'paga','pagato','pago','ha','hanno','versato','saldato',
+  'e','il','la','lo','i','le','gli','di','da','per','con','in','del','della','del',
+  'tassa','associativa','quota','quote','mese','mesi','pagamento','rata',
+  'oggi','ieri','adesso','ora',
 ]);
 
 // Parsa il testo del messaggio in modo flessibile.
