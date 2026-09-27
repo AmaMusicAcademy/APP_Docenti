@@ -43,8 +43,8 @@ router.post('/stripe/setup-intent', ...requireRole('allievo'), async (req, res) 
   try {
     const customerId = await getOrCreateCustomer(req.user.allievoId);
     const intent = await stripe.setupIntents.create({
-      customer:                customerId,
-      automatic_payment_methods: { enabled: true },
+      customer:             customerId,
+      payment_method_types: ['card', 'klarna', 'satispay'],
     });
     res.json({ clientSecret: intent.client_secret });
   } catch (err) {
@@ -130,7 +130,7 @@ router.post('/stripe/payment-intent', ...requireRole('allievo'), async (req, res
       amount:                    totale,
       currency:                  'eur',
       customer:                  customerId,
-      automatic_payment_methods: { enabled: true },
+      payment_method_types:      ['card', 'klarna', 'satispay'],
       description:               `Quote mensili: ${desc}`,
       metadata:             {
         allievo_id: String(req.user.allievoId),
