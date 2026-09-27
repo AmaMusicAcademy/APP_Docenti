@@ -45,7 +45,6 @@ router.post('/stripe/setup-intent', ...requireRole('allievo'), async (req, res) 
     const intent = await stripe.setupIntents.create({
       customer:                customerId,
       automatic_payment_methods: { enabled: true },
-      payment_method_options:  { link: { persistent_token: null } },
     });
     res.json({ clientSecret: intent.client_secret });
   } catch (err) {
@@ -132,7 +131,6 @@ router.post('/stripe/payment-intent', ...requireRole('allievo'), async (req, res
       currency:                  'eur',
       customer:                  customerId,
       automatic_payment_methods: { enabled: true },
-      payment_method_options:    { link: { persistent_token: null } },
       description:               `Quote mensili: ${desc}`,
       metadata:             {
         allievo_id: String(req.user.allievoId),
