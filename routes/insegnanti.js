@@ -286,6 +286,50 @@ router.get('/insegnanti/:id/compenso', authenticateToken, async (req, res) => {
   }
 });
 
+// GET /api/insegnanti/compenso-totale?mese=YYYY-MM  — riepilogo tutti gli insegnanti
+router.get('/insegnanti/compenso-totale', authenticateToken, async (req, res) => {
+  const { mese } = req.query;
+  if (!mese || !/^\d{4}-\d{2}$/.test(mese)) {
+    return res.status(400).json({ error: 'Parametro "mese" non valido (YYYY-MM)' });
+  }
+  try {
+    const insRes = await pool.query(
+      'SELECT id, nome, cognome, tariffa_oraria FROM insegnanti ORDER BY cognome, nome'
+    );
+    const risultati = await Promise.all(insRes.rows.map(async (ins) => {
+      const tariffa = parseFloat(ins.tariffa_oraria ?? 15);
+      const lezRes = await pool.query(
+        `SELECT l.ora_inizio, l.ora_fine
+         FROM lezioni l
+         WHERE l.id_insegnante = $1
+           AND l.stato IN ('svolta', 'annullata')
+           AND DATE_TRUNC('month', l.data) = DATE_TRUNC('month', $2::DATE)`,
+        [ins.id, `${mese}-01`]
+      );
+      let ore = 0;
+      for (const r of lezRes.rows) {
+        ore += (new Date(`1970-01-01T${r.ora_fine}Z`) - new Date(`1970-01-01T${r.ora_inizio}Z`)) / 3600000;
+      }
+      ore = Math.round(ore * 100) / 100;
+      return {
+        id: ins.id,
+        nome: `${ins.cognome} ${ins.nome}`.trim(),
+        tariffaOraria: tariffa,
+        lezioni: lezRes.rowCount,
+        oreTotali: ore,
+        compenso: Math.round(ore * tariffa * 100) / 100,
+      };
+    }));
+
+    const totaleOre = Math.round(risultati.reduce((s, r) => s + r.oreTotali, 0) * 100) / 100;
+    const totaleCompenso = Math.round(risultati.reduce((s, r) => s + r.compenso, 0) * 100) / 100;
+    res.json({ mese, insegnanti: risultati, totaleOre, totaleCompenso });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Errore nel calcolo compenso totale' });
+  }
+});
+
 // POST /api/allievi/:id/insegnanti (associazioni)
 router.post('/allievi/:id/insegnanti', async (req, res) => {
   const { id } = req.params;
