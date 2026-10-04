@@ -32,6 +32,9 @@ const { getAnnoAccademico } = require('../utils/annoAccademico');
     await pool.query(`ALTER TABLE lezioni ADD COLUMN IF NOT EXISTS nome_gruppo TEXT`).catch(() => {});
     await pool.query(`ALTER TABLE lezioni ALTER COLUMN id_allievo DROP NOT NULL`).catch(() => {});
     await pool.query(`ALTER TABLE lezioni ADD COLUMN IF NOT EXISTS serie_id UUID`).catch(() => {});
+    await pool.query(`ALTER TABLE lezioni ADD COLUMN IF NOT EXISTS nome_allievo_prova TEXT`).catch(() => {});
+    await pool.query(`ALTER TABLE lezioni ADD COLUMN IF NOT EXISTS telefono_prova TEXT`).catch(() => {});
+    await pool.query(`ALTER TABLE lezioni ADD COLUMN IF NOT EXISTS note TEXT`).catch(() => {});
   } catch (e) {
     console.error('[lezioni] migration error:', e.message);
   }
@@ -133,7 +136,9 @@ router.get('/lezioni', async (_req, res) => {
         COALESCE(l.tipo, 'individuale') AS tipo,
         l.gruppo_id, COALESCE(l.nome_gruppo, g.nome) AS nome_gruppo,
         i.nome AS nome_insegnante, i.cognome AS cognome_insegnante,
-        a.nome AS nome_allievo, a.cognome AS cognome_allievo,
+        COALESCE(a.nome, l.nome_allievo_prova) AS nome_allievo,
+        a.cognome AS cognome_allievo,
+        l.nome_allievo_prova, l.telefono_prova, l.note,
         (SELECT COUNT(*) FROM lezioni_partecipanti lp WHERE lp.lezione_id = l.id)::int AS num_partecipanti
       FROM lezioni l
       LEFT JOIN insegnanti i ON l.id_insegnante = i.id
@@ -163,6 +168,9 @@ router.get('/lezioni', async (_req, res) => {
           cognome_allievo: l.cognome_allievo,
           aula: l.aula,
           stato: l.stato,
+          nome_allievo_prova: l.nome_allievo_prova,
+          telefono_prova: l.telefono_prova,
+          note: l.note,
           motivazione: l.motivazione,
           riprogrammata: l.riprogrammata,
           storico_programmazioni: Array.isArray(l.storico_programmazioni)
@@ -199,14 +207,18 @@ router.post('/lezioni', authenticateToken, async (req, res) => {
       aula,
       stato = 'appuntamentata',
       motivazione = null,
+      nome_allievo_prova = null,
+      telefono_prova = null,
+      note = null,
     } = req.body;
 
     const isCollettiva = Boolean(gruppo_id);
+    const isProva = stato === 'prova';
 
     if (!id_insegnante || !data || !ora_inizio || !ora_fine) {
       return res.status(400).json({ error: 'Dati incompleti per creare la lezione' });
     }
-    if (!isCollettiva && !id_allievo) {
+    if (!isCollettiva && !id_allievo && !isProva) {
       return res.status(400).json({ error: 'Dati incompleti per creare la lezione' });
     }
 
@@ -238,15 +250,18 @@ router.post('/lezioni', authenticateToken, async (req, res) => {
     const { serie_id = null } = req.body;
 
     const insert = await pool.query(
-      `INSERT INTO lezioni (id_insegnante, id_allievo, gruppo_id, nome_gruppo, tipo, data, ora_inizio, ora_fine, aula, stato, motivazione, riprogrammata, serie_id)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,false,$12) RETURNING *`,
+      `INSERT INTO lezioni (id_insegnante, id_allievo, gruppo_id, nome_gruppo, tipo, data, ora_inizio, ora_fine, aula, stato, motivazione, riprogrammata, serie_id, nome_allievo_prova, telefono_prova, note)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,false,$12,$13,$14,$15) RETURNING *`,
       [
         id_insegnante,
-        isCollettiva ? null : id_allievo,
+        isCollettiva ? null : (id_allievo || null),
         isCollettiva ? gruppo_id : null,
         isCollettiva ? nomeGruppo : null,
         isCollettiva ? 'collettiva' : 'individuale',
         data, ora_inizio, ora_fine, aula, stato, motivazione, serie_id || null,
+        isProva ? nome_allievo_prova : null,
+        isProva ? telefono_prova : null,
+        note || null,
       ]
     );
     const row = insert.rows[0];
@@ -267,6 +282,16 @@ router.post('/lezioni', authenticateToken, async (req, res) => {
         ...row,
         nome_gruppo: nomeGruppo,
         num_partecipanti: membri.length,
+        start: `${dataSolo}T${row.ora_inizio}`,
+        end: `${dataSolo}T${row.ora_fine}`,
+      });
+    }
+
+    // Lezione prova — nessuna notifica push
+    if (isProva) {
+      return res.status(201).json({
+        ...row,
+        nome_allievo: row.nome_allievo_prova,
         start: `${dataSolo}T${row.ora_inizio}`,
         end: `${dataSolo}T${row.ora_fine}`,
       });
