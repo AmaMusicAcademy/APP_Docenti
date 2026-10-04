@@ -7,6 +7,14 @@ const { getAnnoAccademico } = require('../utils/annoAccademico');
 
 const router = express.Router();
 
+// Migration: colonne notifiche insegnanti
+(async () => {
+  try {
+    await pool.query(`ALTER TABLE notifiche ADD COLUMN IF NOT EXISTS dest_type TEXT DEFAULT 'allievo'`);
+    await pool.query(`ALTER TABLE notifiche ADD COLUMN IF NOT EXISTS lezione_id INTEGER`);
+  } catch (e) { console.error('[insegnanti] migration notifiche:', e.message); }
+})();
+
 // Migration automatica all'avvio
 pool.query(`
   ALTER TABLE insegnanti
@@ -434,6 +442,57 @@ router.post('/setup-credentials', async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Errore aggiornamento credenziali' });
+  }
+});
+
+// GET /api/insegnante/notifiche
+router.get('/insegnante/notifiche', authenticateToken, async (req, res) => {
+  const insegnanteId = req.user.insegnanteId;
+  if (!insegnanteId) return res.status(403).json({ error: 'Non autorizzato' });
+  try {
+    const { rows } = await pool.query(
+      `SELECT id, tipo, messaggio, letto, lezione_id, created_at
+       FROM notifiche
+       WHERE dest_id = $1 AND dest_type = 'insegnante'
+       ORDER BY created_at DESC
+       LIMIT 50`,
+      [insegnanteId]
+    );
+    const nonLette = rows.filter(n => !n.letto).length;
+    res.json({ notifiche: rows, nonLette });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Errore recupero notifiche' });
+  }
+});
+
+// PATCH /api/insegnante/notifiche/:id/letto
+router.patch('/insegnante/notifiche/:id/letto', authenticateToken, async (req, res) => {
+  const insegnanteId = req.user.insegnanteId;
+  if (!insegnanteId) return res.status(403).json({ error: 'Non autorizzato' });
+  try {
+    await pool.query(
+      `UPDATE notifiche SET letto=TRUE WHERE id=$1 AND dest_id=$2 AND dest_type='insegnante'`,
+      [req.params.id, insegnanteId]
+    );
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Errore' });
+  }
+});
+
+// PATCH /api/insegnante/notifiche/letto-tutte
+router.patch('/insegnante/notifiche/letto-tutte', authenticateToken, async (req, res) => {
+  const insegnanteId = req.user.insegnanteId;
+  if (!insegnanteId) return res.status(403).json({ error: 'Non autorizzato' });
+  try {
+    await pool.query(
+      `UPDATE notifiche SET letto=TRUE WHERE dest_id=$1 AND dest_type='insegnante' AND letto=FALSE`,
+      [insegnanteId]
+    );
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Errore' });
   }
 });
 

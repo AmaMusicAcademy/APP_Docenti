@@ -296,13 +296,22 @@ router.post('/lezioni', authenticateToken, async (req, res) => {
       });
     }
 
-    // Lezione prova — nessuna notifica push
+    // Lezione prova — notifica all'insegnante
     if (isProva) {
       const provaDett = await pool.query(
         `SELECT nome AS nome_allievo, cognome AS cognome_allievo FROM allievi WHERE id = $1`,
         [row.id_allievo]
       );
       const pa = provaDett.rows[0] || {};
+      const dataFormattata = dataSolo.split('-').reverse().join('/');
+      const oraInizioFmt = String(row.ora_inizio).slice(0, 5);
+      const msgNotifica = `Nuova lezione prova: ${row.nome_allievo_prova || '—'} il ${dataFormattata} alle ${oraInizioFmt}`;
+      try {
+        await pool.query(
+          `INSERT INTO notifiche (dest_id, dest_type, tipo, messaggio, lezione_id) VALUES ($1, 'insegnante', 'lezione_prova', $2, $3)`,
+          [row.id_insegnante, msgNotifica, row.id]
+        );
+      } catch (e) { console.error('Errore notifica insegnante prova:', e.message); }
       return res.status(201).json({
         ...row,
         nome_allievo: row.nome_allievo_prova || pa.nome_allievo,
