@@ -222,6 +222,15 @@ router.post('/lezioni', authenticateToken, async (req, res) => {
       return res.status(400).json({ error: 'Dati incompleti per creare la lezione' });
     }
 
+    // Per lezioni prova: associa automaticamente l'allievo "Lezione Prova"
+    let idAllievoEffettivo = id_allievo || null;
+    if (isProva && !id_allievo) {
+      const provaAllievo = await pool.query(
+        `SELECT id FROM allievi WHERE LOWER(nome) = 'lezione' AND LOWER(cognome) = 'prova' LIMIT 1`
+      );
+      if (provaAllievo.rows.length > 0) idAllievoEffettivo = provaAllievo.rows[0].id;
+    }
+
     if (req.user.ruolo !== 'admin' && String(req.user.insegnanteId) !== String(id_insegnante)) {
       return res.status(403).json({ error: 'Accesso non autorizzato' });
     }
@@ -254,7 +263,7 @@ router.post('/lezioni', authenticateToken, async (req, res) => {
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,false,$12,$13,$14,$15) RETURNING *`,
       [
         id_insegnante,
-        isCollettiva ? null : (id_allievo || null),
+        isCollettiva ? null : idAllievoEffettivo,
         isCollettiva ? gruppo_id : null,
         isCollettiva ? nomeGruppo : null,
         isCollettiva ? 'collettiva' : 'individuale',
@@ -289,9 +298,15 @@ router.post('/lezioni', authenticateToken, async (req, res) => {
 
     // Lezione prova — nessuna notifica push
     if (isProva) {
+      const provaDett = await pool.query(
+        `SELECT nome AS nome_allievo, cognome AS cognome_allievo FROM allievi WHERE id = $1`,
+        [row.id_allievo]
+      );
+      const pa = provaDett.rows[0] || {};
       return res.status(201).json({
         ...row,
-        nome_allievo: row.nome_allievo_prova,
+        nome_allievo: row.nome_allievo_prova || pa.nome_allievo,
+        cognome_allievo: pa.cognome_allievo,
         start: `${dataSolo}T${row.ora_inizio}`,
         end: `${dataSolo}T${row.ora_fine}`,
       });
