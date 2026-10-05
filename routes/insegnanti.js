@@ -212,14 +212,31 @@ router.patch('/insegnanti/:id', ...requireRole('admin'), async (req, res) => {
   if (!sets.length) return res.status(400).json({ error: 'Nessun campo da aggiornare' });
   vals.push(id);
   try {
+    // Se si sta cambiando lo username, recupera il vecchio prima dell'update
+    let oldUsername = null;
+    if (req.body.username !== undefined) {
+      const cur = await pool.query('SELECT username FROM insegnanti WHERE id = $1', [id]);
+      oldUsername = cur.rows[0]?.username || null;
+    }
+
     const { rows } = await pool.query(
       `UPDATE insegnanti SET ${sets.join(', ')} WHERE id = $${vals.length} RETURNING *`,
       vals
     );
     if (!rows.length) return res.status(404).json({ error: 'Insegnante non trovato' });
+
+    // Sincronizza username nella tabella utenti
+    if (req.body.username !== undefined && oldUsername && req.body.username) {
+      await pool.query(
+        'UPDATE utenti SET username = $1 WHERE LOWER(username) = $2',
+        [req.body.username, oldUsername.toLowerCase()]
+      );
+    }
+
     res.json(rows[0]);
   } catch (err) {
     console.error(err);
+    if (err.code === '23505') return res.status(409).json({ error: 'Username già in uso' });
     res.status(500).json({ error: 'Errore nel salvataggio' });
   }
 });
