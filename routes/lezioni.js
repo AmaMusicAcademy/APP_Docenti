@@ -486,6 +486,31 @@ router.put('/lezioni/:id', authenticateToken, async (req, res) => {
   }
 });
 
+// PATCH /api/lezioni/:id/stato  — cambio stato manuale (solo admin)
+router.patch('/lezioni/:id/stato', ...requireRole('admin'), async (req, res) => {
+  const { id } = req.params;
+  const { stato } = req.body;
+  const STATI_VALIDI = ['appuntamentata', 'prova', 'svolta', 'rimandata', 'annullata'];
+  if (!stato || !STATI_VALIDI.includes(stato)) {
+    return res.status(400).json({ error: 'Stato non valido' });
+  }
+  try {
+    const curRes = await pool.query('SELECT stato FROM lezioni WHERE id = $1', [id]);
+    if (!curRes.rows.length) return res.status(404).json({ error: 'Lezione non trovata' });
+    const statoAttuale = curRes.rows[0].stato;
+    if (statoAttuale === stato) return res.status(400).json({ error: 'Stato già impostato' });
+
+    const { rows } = await pool.query(
+      `UPDATE lezioni SET stato = $1 WHERE id = $2 RETURNING *`,
+      [stato, id]
+    );
+    res.json(rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Errore nel cambio stato' });
+  }
+});
+
 // PATCH /api/lezioni/:id/rimanda
 router.patch('/lezioni/:id/rimanda', authenticateToken, async (req, res) => {
   const { id } = req.params;
