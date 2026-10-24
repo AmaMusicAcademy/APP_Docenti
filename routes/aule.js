@@ -37,7 +37,7 @@ router.get('/aule/:id/disponibilita', authenticateToken, async (req, res) => {
        FROM lezioni l
        LEFT JOIN allievi a ON l.id_allievo = a.id
        LEFT JOIN insegnanti i ON l.id_insegnante = i.id
-       WHERE l.aula = $1 AND l.data = $2 AND l.stato NOT IN ('annullata')
+       WHERE l.aula = $1 AND l.data = $2 AND l.stato NOT IN ('annullata', 'rimandata')
        ORDER BY l.ora_inizio`,
       [nomeAula, data]
     );
