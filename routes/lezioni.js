@@ -241,7 +241,7 @@ router.post('/lezioni', authenticateToken, async (req, res) => {
         `SELECT 1 FROM lezioni
          WHERE data = $1 AND aula = $2
            AND ($3 < ora_fine AND $4 > ora_inizio)
-           AND stato NOT IN ('annullata')
+           AND stato NOT IN ('annullata', 'rimandata')
          LIMIT 1`,
         [data, aula, ora_inizio, ora_fine]
       );
@@ -411,7 +411,7 @@ router.put('/lezioni/:id', authenticateToken, async (req, res) => {
         `SELECT 1 FROM lezioni
          WHERE id != $1 AND data = $2 AND aula = $3
            AND ($4 < ora_fine AND $5 > ora_inizio)
-           AND stato NOT IN ('annullata')
+           AND stato NOT IN ('annullata', 'rimandata')
          LIMIT 1`,
         [id, data, aula, ora_inizio, ora_fine]
       );
@@ -618,7 +618,7 @@ router.patch('/lezioni/:id/riprogramma', authenticateToken, async (req, res) => 
       `SELECT 1 FROM lezioni
        WHERE id != $1 AND data=$2 AND aula=$3
          AND ($4 < ora_fine AND $5 > ora_inizio)
-         AND stato NOT IN ('annullata')
+         AND stato NOT IN ('annullata', 'rimandata')
        LIMIT 1`,
       [id, data, aula, ora_inizio, ora_fine]
     );
