@@ -84,11 +84,27 @@ async function migrazioniAc() {
       aggiornato_il TIMESTAMPTZ DEFAULT NOW()
     )
   `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS ac_config (
+      chiave TEXT PRIMARY KEY,
+      valore TEXT NOT NULL
+    )
+  `);
+  await pool.query(`
+    INSERT INTO ac_config (chiave, valore) VALUES ('automazione_attiva', 'true')
+    ON CONFLICT (chiave) DO NOTHING
+  `);
 }
 migrazioniAc().catch(console.error);
 
+async function isAutomazioneAttiva() {
+  const { rows } = await pool.query(`SELECT valore FROM ac_config WHERE chiave = 'automazione_attiva'`);
+  return rows[0]?.valore !== 'false';
+}
+
 // ── Logica principale: controlla orari e agisce ───────────────────────────
 async function controllaAC() {
+  if (!(await isAutomazioneAttiva())) return;
   const { rows: dispositivi } = await pool.query(
     `SELECT * FROM ac_dispositivi WHERE attivo = true ORDER BY ordine, id`
   );
@@ -240,9 +256,12 @@ router.get('/ac/stato', authenticateToken, async (req, res) => {
     const primaOra = lezione?.prima?.slice(0,5);
     const ultimaOra = lezione?.ultima?.slice(0,5);
 
+    const autoOn = await isAutomazioneAttiva();
+
     res.json({
       stato: statoRes.rows[0] || null,
       dispositivi: dispositiviRes.rows,
+      automazione_attiva: autoOn,
       oggi: {
         prima_lezione: primaOra || null,
         ultima_lezione: ultimaOra || null,
@@ -281,6 +300,20 @@ router.post('/ac/spegni', authenticateToken, async (req, res) => {
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
+});
+
+// ── Route: POST /api/ac/automazione ──────────────────────────────────────
+router.post('/ac/automazione', authenticateToken, async (req, res) => {
+  if (req.user.ruolo !== 'admin') return res.status(403).json({ error: 'Solo admin' });
+  const { attiva } = req.body;
+  if (typeof attiva !== 'boolean') return res.status(400).json({ error: 'attiva deve essere boolean' });
+  await pool.query(
+    `INSERT INTO ac_config (chiave, valore) VALUES ('automazione_attiva', $1)
+     ON CONFLICT (chiave) DO UPDATE SET valore = EXCLUDED.valore`,
+    [attiva ? 'true' : 'false']
+  );
+  console.log(`[AC] Automazione ${attiva ? 'ATTIVATA' : 'DISATTIVATA'} da admin`);
+  res.json({ automazione_attiva: attiva });
 });
 
 // ── Route: GET/POST /api/ac/dispositivi (CRUD admin) ─────────────────────
